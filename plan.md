@@ -18,6 +18,50 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 050 Preserve Non-Table Content In Feishu Card Messages
+
+Status: completed
+
+Planned actions:
+
+1. Use the latest Feishu `测试` run as the regression sample.
+2. Fix Markdown table parsing so table prefix and suffix content are preserved.
+3. Build Feishu cards with text/markdown blocks before and after the table component.
+4. Keep text fallback behavior unchanged.
+5. Deploy to OpenWrt, restart the bridge, and verify with a mixed text/table/code/link sample.
+
+Result:
+
+- Confirmed latest Feishu `测试` output contained mixed content:
+  - plain text;
+  - Markdown table;
+  - code block;
+  - inline code;
+  - Markdown link.
+- Root cause was the first card implementation treating the detected table as the whole message.
+- Reworked table parsing to preserve:
+  - prefix text before the table;
+  - table headers/rows;
+  - suffix text after the table.
+- Feishu card output now uses `markdown -> table -> markdown` elements for mixed messages.
+- Text fallback still converts the same message into readable text if card sending fails.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed card builder for the regression sample emits element tags:
+  - `markdown`;
+  - `table`;
+  - `markdown`.
+- Live Feishu API smoke returned:
+  - `rc=0`;
+  - `msgType=interactive`;
+  - `cardTable=true`;
+  - message id `om_x100b502beabc10a8c3833712a49aa42`.
+
 ### 049 Send Markdown Tables As Feishu Cards
 
 Status: completed

@@ -31,21 +31,25 @@ def parse_markdown_table_message(message):
     if not sep:
         return None
 
-    start=text.rfind('\n',0,sep.start())+1
-    prefix=text[:start].rstrip()
-    table_text=text[start:].strip()
-    cells=[clean_feishu_inline_text(cell) for cell in table_text.split('|')]
-    cells=[cell for cell in cells if cell]
+    pipe_positions=[m.start() for m in re.finditer(r'\|', text)]
+    cells=[]
+    for left,right in zip(pipe_positions,pipe_positions[1:]):
+        value=clean_feishu_inline_text(text[left+1:right])
+        if not value:
+            continue
+        cells.append({'left':left,'right':right,'value':value})
     if len(cells) < 5:
         return None
 
     sep_start=-1
     sep_end=-1
     for idx,cell in enumerate(cells):
-        if not is_markdown_table_separator_cell(cell):
+        if cell['left'] < sep.start() or cell['right'] > sep.end():
+            continue
+        if not is_markdown_table_separator_cell(cell['value']):
             continue
         end=idx
-        while end < len(cells) and is_markdown_table_separator_cell(cells[end]):
+        while end < len(cells) and cells[end]['left'] >= sep.start() and cells[end]['right'] <= sep.end() and is_markdown_table_separator_cell(cells[end]['value']):
             end+=1
         if end-idx >= 2:
             sep_start=idx
@@ -57,20 +61,29 @@ def parse_markdown_table_message(message):
     column_count=sep_end-sep_start
     if sep_start < column_count:
         return None
-    headers=cells[sep_start-column_count:sep_start]
+    header_cells=cells[sep_start-column_count:sep_start]
+    headers=[item['value'] for item in header_cells]
     body_cells=cells[sep_end:]
     if not headers or not body_cells:
         return None
 
     rows=[]
+    row_cell_groups=[]
     for idx in range(0,len(body_cells),column_count):
-        row=body_cells[idx:idx+column_count]
-        if len(row) != column_count:
+        group=body_cells[idx:idx+column_count]
+        if len(group) != column_count:
             continue
-        rows.append(row)
+        if any(item['value'].startswith('```') for item in group):
+            break
+        rows.append([item['value'] for item in group])
+        row_cell_groups.append(group)
     if not rows:
         return None
-    return {'prefix':prefix,'headers':headers,'rows':rows,'column_count':column_count}
+    table_start=header_cells[0]['left']
+    table_end=row_cell_groups[-1][-1]['right']
+    prefix=text[:table_start].strip()
+    suffix=text[table_end+1:].strip()
+    return {'prefix':prefix,'suffix':suffix,'headers':headers,'rows':rows,'column_count':column_count,'table_start':table_start,'table_end':table_end}
 
 def markdown_table_to_feishu_text(text):
     parsed=parse_markdown_table_message(text)
@@ -96,10 +109,21 @@ def markdown_table_to_feishu_text(text):
     converted='\n'.join(out)
     if prefix:
         converted=prefix+'\n'+converted
+    suffix=parsed.get('suffix') or ''
+    if suffix:
+        converted=converted+'\n'+suffix
     return converted, True
 
 def feishu_card_text(value, limit=160):
     text=clean_feishu_inline_text(value)
+    if len(text) > limit:
+        text=text[:limit-1]+'…'
+    return text
+
+def feishu_card_markdown(value, limit=1800):
+    text=str(value or '').strip()
+    if not text:
+        return ''
     if len(text) > limit:
         text=text[:limit-1]+'…'
     return text
@@ -131,6 +155,29 @@ def build_feishu_table_card(message):
     if not card_rows:
         return None
     title=feishu_card_text(parsed.get('prefix') or 'Codex 表格',60)
+    elements=[]
+    prefix=feishu_card_markdown(parsed.get('prefix') or '')
+    suffix=feishu_card_markdown(parsed.get('suffix') or '')
+    if prefix:
+        elements.append({'tag':'markdown','content':prefix})
+    elements.append({
+        'tag':'table',
+        'page_size':min(10,max(1,len(card_rows))),
+        'row_height':'auto',
+        'freeze_first_column':len(columns) > 2,
+        'header_style':{
+            'text_align':'left',
+            'text_size':'normal',
+            'background_style':'grey',
+            'text_color':'default',
+            'bold':True,
+            'lines':1,
+        },
+        'columns':columns,
+        'rows':card_rows,
+    })
+    if suffix:
+        elements.append({'tag':'markdown','content':suffix})
     return {
         'schema':'2.0',
         'config':{'wide_screen_mode':True},
@@ -140,22 +187,7 @@ def build_feishu_table_card(message):
         },
         'body':{
             'direction':'vertical',
-            'elements':[{
-                'tag':'table',
-                'page_size':min(10,max(1,len(card_rows))),
-                'row_height':'auto',
-                'freeze_first_column':len(columns) > 2,
-                'header_style':{
-                    'text_align':'left',
-                    'text_size':'normal',
-                    'background_style':'grey',
-                    'text_color':'default',
-                    'bold':True,
-                    'lines':1,
-                },
-                'columns':columns,
-                'rows':card_rows,
-            }],
+            'elements':elements,
         },
     }
 
