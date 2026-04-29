@@ -18,6 +18,34 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 051 Remove Duplicated Feishu Card Prefix Title
+
+Status: completed
+
+Planned actions:
+
+1. Keep the mixed-content `markdown -> table -> markdown` card structure.
+2. Stop using the message prefix as the card header when that prefix is also emitted as body content.
+3. Use a short generic card title for mixed table messages.
+4. Deploy to OpenWrt, restart the bridge, and verify the generated card no longer duplicates the first sentence.
+
+Result:
+
+- Kept the mixed-content card body as `markdown -> table -> markdown`.
+- Changed mixed table card title from the message prefix to `Codex 输出`.
+- The original prefix remains only in the first markdown body element.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed card builder now emits:
+  - title `Codex 输出`;
+  - tags `markdown`, `table`, `markdown`;
+  - first markdown body containing the original prefix.
+
 ### 050 Preserve Non-Table Content In Feishu Card Messages
 
 Status: completed

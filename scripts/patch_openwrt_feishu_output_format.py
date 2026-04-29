@@ -154,7 +154,7 @@ def build_feishu_table_card(message):
         card_rows.append(item)
     if not card_rows:
         return None
-    title=feishu_card_text(parsed.get('prefix') or 'Codex 表格',60)
+    title='Codex 输出' if parsed.get('prefix') or parsed.get('suffix') else 'Codex 表格'
     elements=[]
     prefix=feishu_card_markdown(parsed.get('prefix') or '')
     suffix=feishu_card_markdown(parsed.get('suffix') or '')
