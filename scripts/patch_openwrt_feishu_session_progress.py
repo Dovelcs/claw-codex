@@ -95,6 +95,9 @@ def feishu_session_mirror_text(ev):
         return text
     return ''
 
+def is_feishu_group_chat_id(chat_id):
+    return str(chat_id or '').strip().startswith('oc_')
+
 '''
 
 
@@ -134,6 +137,8 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                         chat_id=str(task.get('chat_id') or '').strip()
                         if not chat_id or not is_feishu_channel(task.get('chat_channel')):
                             continue
+                        if not is_feishu_group_chat_id(chat_id):
+                            continue
                         text=str(ev.get('message') or '').strip()
                         if not text:
                             continue
@@ -149,6 +154,8 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                         continue
                     etype=str(ev.get('type') or '')
                     for chat_id in session_to_chats.get(sid) or []:
+                        if not is_feishu_group_chat_id(chat_id):
+                            continue
                         if etype == 'vscode/assistant':
                             send_feishu_session_progress_mirror(chat_id,sid,text,ev,done=False)
                         elif etype == 'vscode/final':

@@ -18,6 +18,37 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 063 Disable Feishu Private Session Mirrors
+
+Status: completed
+
+Planned actions:
+
+1. Confirm the duplicate output comes from one VS Code session bound to both Feishu group and private chat ids.
+2. Patch the OpenWrt bridge session mirror to accept only Feishu group chat ids (`oc_...`) for VS Code/Codex session synchronization.
+3. Clear existing private-chat progress bindings from the live mirror state.
+4. Deploy the patch, restart only the bridge subprocess, verify health, and commit the change.
+
+Result:
+
+- Confirmed the live mirror state had both:
+  - group progress binding `oc_7aebc9ba04e7e23b3893c85d5cbf360b|019dd3d6-a736...`;
+  - private progress binding `ou_b5312eaa2d5d8ba516a2d160fd26ccff|019dd3d6-a736...`.
+- Updated `scripts/patch_openwrt_feishu_session_progress.py` to add `is_feishu_group_chat_id`.
+- OpenWrt bridge session mirror now skips non-group Feishu targets for:
+  - VS Code/Codex session mirror streaming;
+  - session mirror task-final fallback.
+- Removed the existing live private progress binding from `fleet-feishu-session-mirror.json`.
+- Restarted only the OpenWrt bridge subprocess.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_session_progress.py` passed.
+- OpenWrt deployment patched both bridge copies and remote `py_compile` passed.
+- Deployed bridge contains `def is_feishu_group_chat_id` and two `not is_feishu_group_chat_id` guards.
+- OpenWrt bridge `/health` returned `ok: true`.
+- Live mirror state now has only the `oc_...` group progress binding; the `ou_...` private binding was removed.
+
 ### 062 Reset Feishu VS Code Progress Card Per User Turn
 
 Status: completed
