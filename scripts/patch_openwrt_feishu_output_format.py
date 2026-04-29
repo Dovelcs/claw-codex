@@ -254,6 +254,43 @@ def build_feishu_table_card(message):
         },
     }
 
+def extract_vscode_user_request(message):
+    text=str(message or '').strip()
+    if text.startswith('VS Code：'):
+        text=text[len('VS Code：'):].strip()
+    text=re.sub(r'<image>.*?</image>', '', text, flags=re.I|re.S)
+    text=re.sub(r'<image[^>]*>', '', text, flags=re.I)
+    marker='## My request for Codex:'
+    idx=text.find(marker)
+    if idx >= 0:
+        text=text[idx+len(marker):].strip()
+    text=re.sub(r'# Context from my IDE setup:.*?(?=## My request for Codex:|$)', '', text, flags=re.S).strip()
+    text=re.sub(r'## Active file:.*?(?=##|$)', '', text, flags=re.S).strip()
+    text=re.sub(r'## Open tabs:.*?(?=##|$)', '', text, flags=re.S).strip()
+    text=' '.join(text.split()).strip()
+    text=re.sub(r'\s*<image>\s*$', '', text).strip()
+    if len(text) > 500:
+        text=text[:499]+'…'
+    return text or '（空消息）'
+
+def build_feishu_vscode_user_card(message):
+    text=str(message or '').strip()
+    if not text.startswith('VS Code：'):
+        return None
+    request=extract_vscode_user_request(text)
+    return {
+        'schema':'2.0',
+        'config':{'wide_screen_mode':True},
+        'header':{
+            'template':'turquoise',
+            'title':{'tag':'plain_text','content':'VS Code 用户发言'},
+        },
+        'body':{
+            'direction':'vertical',
+            'elements':[{'tag':'markdown','content':request}],
+        },
+    }
+
 def format_feishu_outbound_text(message):
     text=str(message or '').strip()
     if not text:
@@ -296,7 +333,7 @@ SEND_BLOCK = r'''def send_feishu_api(msg,target,account='default'):
             return json.loads(resp.read().decode())
 
     original_msg=str(msg)
-    card=build_feishu_table_card(original_msg)
+    card=build_feishu_vscode_user_card(original_msg) or build_feishu_table_card(original_msg)
     if card:
         body={'receive_id':target,'msg_type':'interactive','content':json.dumps(card,ensure_ascii=False)}
         try:

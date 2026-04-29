@@ -18,6 +18,39 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 054 Compact VS Code User Mirror Feishu Cards
+
+Status: completed
+
+Planned actions:
+
+1. Keep VS Code assistant/final mirror output unchanged.
+2. Detect VS Code user mirror messages before normal Feishu text sending.
+3. Extract only the real `My request for Codex` content and drop IDE context/open-tab noise.
+4. Send user mirror messages as short Feishu cards with a distinct colored header.
+5. Deploy to OpenWrt, restart the bridge, and verify with the user's real long VS Code mirror sample.
+
+Result:
+
+- Added a VS Code user mirror card path in the Feishu sender.
+- Messages starting with `VS Code：` now become Feishu interactive cards instead of long plain text.
+- The card extracts only the real `## My request for Codex:` content.
+- IDE context, active file, open tabs, and image placeholders are dropped from the visible Feishu body.
+- User-origin VS Code cards use title `VS Code 用户发言` with `turquoise` header color.
+- Assistant/final mirror output is unchanged.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Regression sample:
+  - input started with `VS Code：# Context from my IDE setup...`;
+  - extracted request is `继续读取，你这里明显换行没有了`;
+  - deployed card title is `VS Code 用户发言`;
+  - deployed card template is `turquoise`.
+
 ### 053 Split Compact Shell Code Blocks In Feishu Cards
 
 Status: completed
