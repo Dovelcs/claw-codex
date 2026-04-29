@@ -18,6 +18,47 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 047 Beautify Feishu Output Formatting
+
+Status: completed
+
+Planned actions:
+
+1. Add a Feishu outbound text formatter at the queue dispatcher layer.
+2. Keep raw VS Code/manager events unchanged; only format the text sent to Feishu.
+3. Strip markdown-only markers that Feishu text messages render literally.
+4. Split compact numbered/bullet lists into readable multiline text.
+5. Deploy to OpenWrt, restart the bridge, and smoke test with a compact numbered answer.
+
+Result:
+
+- Added `scripts/patch_openwrt_feishu_output_format.py`.
+- Deployed a Feishu outbound formatter at the queue dispatcher layer:
+  - strips `**bold**`, `__bold__`, and backticks that Feishu text messages render literally;
+  - splits compact numbered lists like `1. ... 2. ... 3. ...` into separate lines;
+  - preserves short/plain messages.
+- Added `scripts/patch_openwrt_feishu_target_normalize.py` after queue inspection showed invalid retry targets like `default:direct:ou_...:thread:...`.
+- Feishu target normalization now extracts `oc_`, `ou_`, and `on_` ids from group/direct/session-thread ids.
+- Restarted the OpenWrt bridge inside `openclaw-gateway-v2`.
+- Marked old invalid retry rows as `failed` so they stop retrying.
+
+Evidence:
+
+- Local `python3 -m py_compile` passed for both new patch scripts.
+- Remote `python3 -m py_compile` passed for both deployed bridge files after patching.
+- Remote formatter smoke:
+  - input `有几类常见原因： 1. **任务需要读仓库**。 2. **上下文很长**。`;
+  - output split into:
+    - `有几类常见原因：`
+    - `1. 任务需要读仓库。`
+    - `2. 上下文很长。`
+- Real queue smoke row `format-smoke-20260429-2005` sent successfully with formatted `send_json.message`:
+  - `FEISHU_FORMAT_SMOKE 有几类常见原因：`
+  - `1. 任务需要读仓库或跑命令 比如查文件。`
+  - `2. 上下文很长 当前会话带了很多规则。`
+  - `3. 需要严格遵守工具/技能规则 涉及代码。`
+- Remote target normalization smoke maps `default:direct:ou_b5312...:thread:om_xxx` to `ou_b5312...`.
+
 ### 046 Initialize GitHub Repository Management
 
 Status: completed
