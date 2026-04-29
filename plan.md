@@ -18,6 +18,42 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 058 Separate Feishu Company Fleet From WeChat Local Codex
+
+Status: completed
+
+Planned actions:
+
+1. Keep Feishu as the only channel allowed to enter company fleet routing.
+2. Stop WeChat/OpenClaw-Weixin messages from triggering company session lists, bindings, status, task send, or active fleet forwarding.
+3. Leave WeChat normal local OpenWrt Codex execution path untouched by returning no direct fleet answer.
+4. Deploy to OpenWrt bridge, restart it, and verify channel-policy behavior directly.
+
+Result:
+
+- Added `scripts/patch_openwrt_channel_policy.py` to patch both OpenWrt bridge copies in place.
+- Added a `is_company_fleet_channel(channel)` policy gate before company fleet routing.
+- Restricted company fleet direct handling to Feishu channels only.
+- WeChat/OpenClaw-Weixin now returns no direct fleet answer for:
+  - company session listing;
+  - `/绑定`;
+  - company task forwarding;
+  - active fleet session routing.
+- Restarted the OpenWrt OpenClaw bridge server after deployment.
+
+Evidence:
+
+- OpenWrt bridge health returned `{"ok":true,...}` after restart.
+- Deployed bridge contains:
+  - `def is_company_fleet_channel(channel):`;
+  - `if not is_company_fleet_channel(channel): return ''`.
+- Direct policy smoke inside the OpenWrt bridge process showed:
+  - WeChat `列出公司codex所有会话` -> empty direct fleet answer;
+  - WeChat `/绑定 codex-server` -> empty direct fleet answer;
+  - WeChat normal company-task text -> empty direct fleet answer;
+  - Feishu `/绑定 codex-server` -> normal company project binding response;
+  - Feishu unbound task text -> normal Feishu binding guidance.
+
 ### 057 Install Boot Autostart For Fleet Bridge Services
 
 Status: completed
