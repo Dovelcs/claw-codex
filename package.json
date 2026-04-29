@@ -1,0 +1,31 @@
+{
+  "name": "codex-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Bridge utilities for controlling Codex app-server threads from remote clients.",
+  "bin": {
+    "codex-vscode-bridge": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "bridge": "node dist/cli.js",
+    "fleet-manager": "python3 fleet_manager/codex_fleet_manager.py",
+    "fleet-mcp": "node fleet_manager/codex_fleet_mcp.mjs",
+    "test:fleet": "python3 -m unittest fleet_manager/test_codex_fleet_manager.py"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.20.0"
+  }
+}

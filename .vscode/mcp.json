@@ -1,0 +1,27 @@
+{
+  "servers": {
+    "task-master-ai": {
+      "type": "stdio",
+      "command": "/home/donovan/.npm-global/bin/task-master-mcp",
+      "env": {
+        "TASK_MASTER_TOOLS": "all"
+      }
+    },
+    "serena": {
+      "type": "stdio",
+      "command": "/home/donovan/.local/bin/serena",
+      "args": [
+        "start-mcp-server",
+        "--context",
+        "codex",
+        "--project-from-cwd",
+        "--enable-web-dashboard",
+        "false",
+        "--open-web-dashboard",
+        "false",
+        "--log-level",
+        "WARNING"
+      ]
+    }
+  }
+}

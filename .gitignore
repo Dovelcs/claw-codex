@@ -1,0 +1,43 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dev-debug.log
+log.txt
+
+# Dependency directories
+node_modules/
+dist/
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# Editor directories and files
+.idea
+.vscode/*
+!.vscode/mcp.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS specific
+.DS_Store
+
+# Local Codex/OpenClaw runtime state and generated probe outputs
+.codex
+.serena/
+.taskmaster/config.json
+.taskmaster/state.json
+__pycache__/
+**/__pycache__/
+*.pyc
+debug/*/
+debug/*.jsonl
+debug/*.txt
+test.txt/
