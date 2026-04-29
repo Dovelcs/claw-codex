@@ -18,6 +18,43 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 056 Stream VS Code Manual Session Replies To Feishu
+
+Status: completed
+
+Planned actions:
+
+1. Report mirrored VS Code `codex_reply` events from the company worker as `vscode/assistant`.
+2. Keep task-owned rollout events deduped so Feishu-origin tasks do not double-report.
+3. Extend OpenWrt session mirror to update one Feishu progress card for `vscode/assistant`.
+4. Convert the same card to completed when `vscode/final` arrives.
+5. Restart the worker and OpenWrt bridge, then verify event formatting and health.
+
+Result:
+
+- Company worker now reports mirrored VS Code manual-session `codex_reply` rollout events as `vscode/assistant`.
+- Task-owned rollout events remain filtered out of the manual session mirror, preserving the existing dedupe behavior for Feishu-origin tasks.
+- Added `scripts/patch_openwrt_feishu_session_progress.py`.
+- OpenWrt session mirror now:
+  - treats `vscode/assistant` as progress;
+  - creates or edits one Feishu progress card per session/chat;
+  - edits that card to completed when `vscode/final` arrives;
+  - keeps VS Code user mirror cards unchanged.
+- Rebuilt and restarted the company worker through the watchdog.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- `npm run typecheck` passed.
+- `npm test` passed: 27 Node tests.
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_session_progress.py scripts/patch_openwrt_feishu_progress_edit.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- OpenWrt bridge health reports `ok=true` and `outbound_queue`.
+- Fleet manager reports `company-main` online after worker restart.
+- Deployed formatter smoke:
+  - `vscode/assistant` maps to progress text;
+  - progress card title is `Codex 处理中` with blue template.
+
 ### 055 Edit Feishu Progress Card For Long Tasks
 
 Status: completed

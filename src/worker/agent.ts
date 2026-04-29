@@ -426,16 +426,21 @@ export class WorkerAgent {
       return;
     }
     const text = rolloutEvent.text?.trim();
-    if (!text || (rolloutEvent.kind !== "user_input" && rolloutEvent.kind !== "final_answer")) {
+    if (!text || (rolloutEvent.kind !== "user_input" && rolloutEvent.kind !== "codex_reply" && rolloutEvent.kind !== "final_answer")) {
       return;
     }
     if (this.isRecentlyReportedTaskRolloutEvent(rolloutEvent, text)) {
       return;
     }
+    const typeByKind: Record<"user_input" | "codex_reply" | "final_answer", string> = {
+      user_input: "vscode/user",
+      codex_reply: "vscode/assistant",
+      final_answer: "vscode/final"
+    };
     await this.manager.postEvents({
       events: [{
         session_id: rolloutEvent.threadId,
-        type: rolloutEvent.kind === "user_input" ? "vscode/user" : "vscode/final",
+        type: typeByKind[rolloutEvent.kind],
         message: text,
         data: {
           ...rolloutEvent,
