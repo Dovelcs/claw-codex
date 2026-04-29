@@ -18,6 +18,38 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 059 Speed Up First Feishu Progress Update
+
+Status: completed
+
+Planned actions:
+
+1. Inspect the current Feishu progress-card send/edit throttling path.
+2. Make the first visible progress update fire faster while keeping later edits rate-limited.
+3. Deploy the bridge patch to OpenWrt and restart only the bridge subprocess.
+4. Verify the deployed defaults and bridge health.
+
+Result:
+
+- Reduced Feishu task completion watcher polling default from `0.5s` to `0.25s`.
+- Reduced task progress-card edit throttle default from `4s` to `1s`.
+- Reduced first progress minimum content threshold from `120` chars to `1` char.
+- Added immediate Feishu progress-card bootstrap text `正在处理...` when a Feishu task watcher starts.
+- After the bootstrap card is created, the first real Codex progress text can overwrite it immediately instead of waiting for the edit interval.
+- Reduced VS Code session mirror polling default from `2.0s` with `1.0s` minimum to `0.5s` with `0.2s` minimum.
+
+Evidence:
+
+- `python3 -m py_compile scripts/patch_openwrt_feishu_progress_edit.py` passed locally.
+- OpenWrt deployment patched both bridge copies and `py_compile` passed on both deployed files.
+- Deployed bridge now contains:
+  - `CODEX_FLEET_COMPLETION_PUSH_INTERVAL` default `0.25`;
+  - `CODEX_FEISHU_PROGRESS_EDIT_INTERVAL` default `1`;
+  - `CODEX_FEISHU_PROGRESS_MIN_CHARS` default `1`;
+  - `CODEX_FEISHU_PROGRESS_BOOTSTRAP`;
+  - `CODEX_FLEET_SESSION_MIRROR_INTERVAL` default `0.5`.
+- OpenWrt OpenClaw bridge restarted successfully and `/health` returned `ok: true`.
+
 ### 058 Separate Feishu Company Fleet From WeChat Local Codex
 
 Status: completed

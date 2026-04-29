@@ -85,10 +85,10 @@ def feishu_progress_message_id(rec):
 
 WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None):
     timeout=float(os.environ.get('CODEX_FLEET_COMPLETION_PUSH_TIMEOUT','900'))
-    interval=float(os.environ.get('CODEX_FLEET_COMPLETION_PUSH_INTERVAL','0.5'))
-    interval=max(0.2,interval)
-    progress_edit_interval=max(1.0,float(os.environ.get('CODEX_FEISHU_PROGRESS_EDIT_INTERVAL','4')))
-    progress_min_chars=max(20,int(os.environ.get('CODEX_FEISHU_PROGRESS_MIN_CHARS','120')))
+    interval=float(os.environ.get('CODEX_FLEET_COMPLETION_PUSH_INTERVAL','0.25'))
+    interval=max(0.1,interval)
+    progress_edit_interval=max(0.5,float(os.environ.get('CODEX_FEISHU_PROGRESS_EDIT_INTERVAL','1')))
+    progress_min_chars=max(1,int(os.environ.get('CODEX_FEISHU_PROGRESS_MIN_CHARS','1')))
     deadline=time.time()+max(10,timeout); last=''
     feishu_group=run_dir_is_feishu_group(run_dir)
     try:
@@ -147,6 +147,12 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
             if run_dir:
                 append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'error':repr(e),'text':text},ensure_ascii=False))
             return None
+    if feishu_chat and feishu_target and os.environ.get('CODEX_FEISHU_PROGRESS_BOOTSTRAP','1') != '0':
+        progress_buffer.append(str(os.environ.get('CODEX_FEISHU_PROGRESS_BOOTSTRAP_TEXT','正在处理...')).strip() or '正在处理...')
+        progress_card_update(force=True)
+        progress_buffer.clear()
+        last_progress_text=''
+        last_progress_edit=0.0
     while time.time()<deadline:
         try:
             events=fleet_task_events(task_id,50)
@@ -257,6 +263,10 @@ def patch_file(path: Path) -> None:
     text = text.replace(
         "if etype in ('agent_message_delta','response.output_text.delta','assistant/delta'):",
         "if etype in ('agent_message_delta','response.output_text.delta','assistant/delta','vscode/assistant'):",
+    )
+    text = text.replace(
+        "interval=max(1.0,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_INTERVAL','2.0')))",
+        "interval=max(0.2,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_INTERVAL','0.5')))",
     )
 
     if text == original:
