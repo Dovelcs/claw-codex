@@ -47,7 +47,7 @@ Evidence:
 
 ### 045 Unified Feishu Message Queue
 
-Status: in progress
+Status: completed
 
 Planned actions:
 
@@ -56,6 +56,34 @@ Planned actions:
 3. Route Feishu task completions and VS Code mirrored session events through the queue instead of direct send.
 4. Preserve immediate human-visible latency while making duplicate enqueue attempts no-ops.
 5. Deploy, restart, and verify one Feishu task produces one queue row and one outgoing message.
+
+Result:
+
+- Added `scripts/patch_openwrt_outbound_queue.py` to patch the deployed OpenWrt bridge deterministically.
+- Deployed a SQLite-backed `outbound_message_queue` on OpenWrt:
+  - `event_key` is unique;
+  - writers use `insert or ignore`;
+  - one dispatcher claims `pending/retry` rows and sends through Feishu API;
+  - sent rows keep `send_json`, `attempts`, and `sent_at`.
+- Feishu task completion watcher now enqueues final/progress/cancel/error messages instead of directly calling Feishu send.
+- VS Code session mirror events now enqueue by `fleet-session:<event_id>:<target>`, so the same manager event cannot be sent twice.
+- OpenWrt bridge `/health` now reports `outbound_queue` counts.
+- Restarted the OpenWrt bridge inside `openclaw-gateway-v2`.
+
+Evidence:
+
+- Remote `python3 -m py_compile` passed for both deployed bridge files:
+  - `/data/state/codex-bridge/package/server/codex_bridge_server.py`;
+  - `/opt/weixin-bot/openclaw/openclaw-codex-bridge/server/codex_bridge_server.py`.
+- Bridge health returns `outbound_queue`.
+- Smoke run `20260429-115912-994d552c` submitted Feishu prompt `只输出：FEISHU_QUEUE_ONCE_OK`.
+- Company task `task-a9f8fa46675c` completed with `FEISHU_QUEUE_ONCE_OK`.
+- Queue row:
+  - `event_key=fleet-task:task-a9f8fa46675c:final:a06e16b590d1aceb172d1b05`;
+  - `status=sent`;
+  - `attempts=1`;
+  - `target=oc_18b42b40d85048d71ff9d96e744b841b`.
+- Run `channel-send.log` contains exactly one `FEISHU_QUEUE_ONCE_OK` send record.
 
 ### 044 Deduplicate Feishu Completion Messages
 
