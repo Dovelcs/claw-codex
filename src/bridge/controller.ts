@@ -72,10 +72,17 @@ export class BridgeController extends EventEmitter {
     return threadId;
   }
 
-  async sendToActiveThread(text: string): Promise<StartOrSteerResult> {
+  async sendToActiveThread(text: string, options: { guidance?: boolean } = {}): Promise<StartOrSteerResult> {
     const threadId = await this.activeThreadId();
     if (!this.vscodeIpc) {
       throw new Error("VS Code IPC is disabled; refusing to use deprecated app-server write path");
+    }
+    if (options.guidance) {
+      try {
+        return await this.vscodeIpc.steerTurn(threadId, text);
+      } catch {
+        return this.vscodeIpc.startTurn(threadId, text);
+      }
     }
     return this.vscodeIpc.startTurn(threadId, text);
   }

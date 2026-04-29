@@ -18,6 +18,37 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 060 Feishu Guidance Messages Steer Running VS Code Turn
+
+Status: completed
+
+Planned actions:
+
+1. Make a normal Feishu message in a bound chat reuse the current active chat task unless it explicitly asks for a new task.
+2. Mark reused active-task messages as guidance commands instead of independent tasks.
+3. Make the company worker use VS Code IPC `steerTurn` for guidance commands, falling back to `startTurn` only when steering is unavailable.
+4. Add focused manager/worker tests and deploy the updated manager and worker.
+
+Result:
+
+- Fleet manager now treats a normal message in a bound Feishu chat with an active task as guidance for that active task.
+- Explicit new-task phrases such as `新任务：...` still create a separate task.
+- Guidance commands reuse the active task id and carry `guidance: true` in the worker payload.
+- Worker now sends guidance commands through VS Code IPC `thread-follower-steer-turn` first.
+- If steering is unavailable, worker falls back to VS Code IPC `thread-follower-start-turn`.
+- OpenWrt bridge route now avoids starting a second completion watcher for guidance responses, preventing duplicate final/progress messages.
+- Deployed the updated fleet manager to OpenWrt, patched both OpenWrt bridge copies, restarted fleet manager and bridge, rebuilt local TypeScript dist, and restarted the company worker agent.
+
+Evidence:
+
+- `python3 -m unittest fleet_manager/test_codex_fleet_manager.py` passed with 9 tests.
+- `npm test` passed with 29 tests.
+- OpenWrt fleet manager `/api/state` responded after restart.
+- OpenWrt bridge `/health` returned `ok: true`.
+- OpenWrt deployed manager contains `is_new_chat_task_request`, `_enqueue_chat_guidance`, and `task/guidance_queued`.
+- OpenWrt deployed bridge contains `guidance=...` and skips `start_fleet_completion_watcher` when guidance is true.
+- Company worker process restarted from rebuilt `dist/cli.js` and endpoint `company-main` is online.
+
 ### 059 Speed Up First Feishu Progress Update
 
 Status: completed

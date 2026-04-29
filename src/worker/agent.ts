@@ -173,7 +173,7 @@ export class WorkerAgent {
     const rolloutWatch = this.watchVscodeRollout(command, session);
     let sent;
     try {
-      sent = await controller.sendToActiveThread(prompt);
+      sent = await controller.sendToActiveThread(prompt, { guidance: booleanValue(command.payload.guidance) });
     } catch (error) {
       rolloutWatch?.abort();
       throw error;
@@ -681,6 +681,10 @@ function stringValue(value: unknown): string | undefined {
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
 }
 
 function parseJsonLine(line: string): unknown {

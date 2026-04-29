@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import queue
+import re
 import sqlite3
 import threading
 import time
@@ -47,6 +48,13 @@ def read_json(value: str | None, fallback: Any) -> Any:
         return json.loads(value)
     except Exception:
         return fallback
+
+
+def is_new_chat_task_request(prompt: str) -> bool:
+    text = str(prompt or "").strip().lower()
+    if not text:
+        return False
+    return bool(re.search(r"^(新任务|新建任务|另起|另开|重新开|开启新任务|start new|new task)(?:\s|[:：,，。]|$)", text, re.I))
 
 
 class FleetStore:
@@ -484,6 +492,9 @@ class FleetStore:
             binding = self.chat_binding(channel, chat_id)
             if not binding:
                 raise KeyError(f"chat is not bound: {channel}:{chat_id}")
+            active = self.chat_active_task(channel, chat_id)
+            if active and not is_new_chat_task_request(prompt):
+                return self._enqueue_chat_guidance(binding, active, prompt)
             profile = binding.get("profile") or f"{channel}:{chat_id}"
             return self._create_task(
                 profile,
@@ -494,6 +505,31 @@ class FleetStore:
                 chat_channel=channel,
                 chat_id=chat_id,
             )
+
+    def _enqueue_chat_guidance(self, binding: dict[str, Any], active: dict[str, Any], prompt: str) -> dict[str, Any]:
+        endpoint_id = active.get("endpoint_id") or binding.get("endpoint_id")
+        task_id = active.get("task_id")
+        if not endpoint_id or not task_id:
+            raise RuntimeError("active chat task is missing endpoint or task id")
+        project = self.project(binding.get("project_alias") or "") if binding.get("project_alias") else None
+        session_id = active.get("session_id") or binding.get("session_id")
+        payload = {
+            "task_id": task_id,
+            "prompt": prompt,
+            "project": project,
+            "session_id": session_id,
+            "mode": active.get("mode") or (project or {}).get("mode") or "vscode",
+            "guidance": True,
+            "active_task_id": task_id,
+        }
+        self.enqueue_command(endpoint_id, task_id, "send", payload)
+        self.add_event(endpoint_id, task_id, session_id, "task/guidance_queued", "guidance queued", payload)
+        self.db.execute("update tasks set updated_at=? where task_id=?", (now(), task_id))
+        self.db.commit()
+        self.notify(endpoint_id)
+        task = self.task(task_id) or dict(active)
+        task["guidance"] = True
+        return task
 
     def chat_status(self, channel: str, chat_id: str) -> dict[str, Any]:
         binding = self.chat_binding(channel, chat_id)

@@ -101,6 +101,59 @@ class FleetStoreTest(unittest.TestCase):
         self.assertEqual(status["active_task"]["task_id"], task["task_id"])
         self.assertEqual(commands[0]["payload"]["project"]["alias"], "codex-server")
 
+    def test_chat_message_guides_active_task_by_default(self):
+        self.store.register_endpoint("company-main", "Company", {"vscode": True}, [
+            {"id": "thread-1", "source": "vscode", "title": "codex-server", "cwd": "/repo/codex-server"}
+        ])
+        self.store.register_project("codex-server", "company-main", "/repo/codex-server")
+        self.store.bind_chat("openclaw-feishu", "chat-1", "session-key-1", "codex-server")
+        task = self.store.create_chat_task("openclaw-feishu", "chat-1", "先做 A")
+        first_command = self.store.claim_commands("company-main")[0]
+        self.store.record_worker_events("company-main", {
+            "command_results": [{
+                "command_id": first_command["command_id"],
+                "task_id": task["task_id"],
+                "ok": True,
+                "task_status": "running",
+                "session_id": "thread-1",
+            }]
+        })
+
+        guided = self.store.create_chat_task("openclaw-feishu", "chat-1", "补充：先改方向 B")
+        guidance_command = self.store.claim_commands("company-main")[0]
+
+        self.assertEqual(guided["task_id"], task["task_id"])
+        self.assertTrue(guided["guidance"])
+        self.assertEqual(guidance_command["task_id"], task["task_id"])
+        self.assertTrue(guidance_command["payload"]["guidance"])
+        self.assertEqual(guidance_command["payload"]["prompt"], "补充：先改方向 B")
+        self.assertEqual(guidance_command["payload"]["session_id"], "thread-1")
+
+    def test_chat_message_can_explicitly_start_new_task(self):
+        self.store.register_endpoint("company-main", "Company", {"vscode": True}, [
+            {"id": "thread-1", "source": "vscode", "title": "codex-server", "cwd": "/repo/codex-server"}
+        ])
+        self.store.register_project("codex-server", "company-main", "/repo/codex-server")
+        self.store.bind_chat("openclaw-feishu", "chat-1", "session-key-1", "codex-server")
+        task = self.store.create_chat_task("openclaw-feishu", "chat-1", "先做 A")
+        first_command = self.store.claim_commands("company-main")[0]
+        self.store.record_worker_events("company-main", {
+            "command_results": [{
+                "command_id": first_command["command_id"],
+                "task_id": task["task_id"],
+                "ok": True,
+                "task_status": "running",
+                "session_id": "thread-1",
+            }]
+        })
+
+        new_task = self.store.create_chat_task("openclaw-feishu", "chat-1", "新任务：做 C")
+        new_command = self.store.claim_commands("company-main")[0]
+
+        self.assertNotEqual(new_task["task_id"], task["task_id"])
+        self.assertNotIn("guidance", new_task)
+        self.assertFalse(new_command["payload"].get("guidance", False))
+
     def test_unbind_chat(self):
         self.store.register_endpoint("company-main", "Company", {})
         self.store.register_project("codex-server", "company-main", "/repo/codex-server")
