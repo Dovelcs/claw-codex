@@ -120,6 +120,48 @@ def feishu_card_text(value, limit=160):
         text=text[:limit-1]+'…'
     return text
 
+def split_compact_shell_code(lang, body):
+    code=str(body or '').strip()
+    if not code or '\n' in code:
+        return code
+    shell_langs={'','sh','bash','zsh','shell','console','terminal'}
+    if str(lang or '').strip().lower() not in shell_langs:
+        return code
+    code=re.sub(r'\s*(?:&&|;)\s*', '\n', code)
+    if '\n' in code:
+        return code.strip()
+    commands=('pwd','ls','cd','cat','sed','awk','grep','rg','find','git','npm','pnpm','yarn','python','python3','node','make','cmake','ninja','docker','curl','wget','adb','ssh','scp','rsync')
+    parts=[]
+    start=0; i=0; single=False; double=False; escape=False
+    while i < len(code):
+        ch=code[i]
+        if escape:
+            escape=False; i+=1; continue
+        if ch == '\\':
+            escape=True; i+=1; continue
+        if ch == "'" and not double:
+            single=not single; i+=1; continue
+        if ch == '"' and not single:
+            double=not double; i+=1; continue
+        if not single and not double and ch.isspace():
+            j=i
+            while j < len(code) and code[j].isspace():
+                j+=1
+            rest=code[j:]
+            for cmd in commands:
+                if rest == cmd or rest.startswith(cmd+' '):
+                    prev=code[start:i].strip()
+                    if prev:
+                        parts.append(prev)
+                    start=j
+                    i=j
+                    break
+        i+=1
+    tail=code[start:].strip()
+    if tail:
+        parts.append(tail)
+    return '\n'.join(parts) if len(parts) > 1 else code
+
 def normalize_feishu_card_markdown(value):
     text=str(value or '').strip()
     if not text:
@@ -127,7 +169,7 @@ def normalize_feishu_card_markdown(value):
     labels='普通文本|表格|代码|行内代码|链接|列表|编号列表|引用|强调|任务列表'
     text=re.sub(r'([：:])\s+('+labels+r')：', r'\1\n\2：', text)
     text=re.sub(r'\s+('+labels+r')：', r'\n\1：', text)
-    text=re.sub(r'```([A-Za-z0-9_+.-]*)\s+([^`\n][\s\S]*?)\s+```', lambda m: '```'+m.group(1)+'\n'+m.group(2).strip()+'\n```', text)
+    text=re.sub(r'```([A-Za-z0-9_+.-]*)\s+([^`\n][\s\S]*?)\s+```', lambda m: '```'+m.group(1)+'\n'+split_compact_shell_code(m.group(1),m.group(2))+'\n```', text)
     text=re.sub(r'(代码：)\s*```', r'\1\n```', text)
     text=re.sub(r'```\s*(行内代码：|链接：|列表：|编号列表：|引用：|强调：|任务列表：)', r'```\n\1', text)
     text=re.sub(r'(列表：)\s*-\s+', r'\1\n- ', text)

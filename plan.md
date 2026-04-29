@@ -18,6 +18,37 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 053 Split Compact Shell Code Blocks In Feishu Cards
+
+Status: completed
+
+Planned actions:
+
+1. Keep the current Feishu card structure and table rendering unchanged.
+2. Add shell-code specific normalization for compact one-line fenced code blocks.
+3. Split obvious chained shell commands such as `echo ... pwd` into separate lines.
+4. Deploy to OpenWrt, restart the bridge, and verify the regression code block renders as two lines in the card payload.
+
+Result:
+
+- Added shell-code specific compaction repair for Feishu card markdown code fences.
+- The repair is limited to shell-like fences such as `bash`, `sh`, `zsh`, `shell`, `console`, and `terminal`.
+- Compact command strings such as `echo "hello codex" pwd` now render as:
+  - `echo "hello codex"`;
+  - `pwd`.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed card payload suffix now contains:
+  - ````bash`;
+  - `echo \"hello codex\"`;
+  - `pwd`;
+  - closing fence.
+
 ### 052 Restore Line Breaks In Feishu Card Markdown Blocks
 
 Status: completed
