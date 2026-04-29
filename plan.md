@@ -18,6 +18,39 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 062 Reset Feishu VS Code Progress Card Per User Turn
+
+Status: completed
+
+Planned actions:
+
+1. Confirm whether Feishu send is broken or the session mirror is editing an old progress card.
+2. Patch the OpenWrt bridge session mirror so a new `vscode/user` event clears that session/chat progress-card binding.
+3. Keep `vscode/assistant` streaming as edit-in-place within the current turn, and keep `vscode/final` completion handling unchanged.
+4. Deploy the patch to OpenWrt, restart only the bridge subprocess, and verify health plus live session mirror logs.
+
+Result:
+
+- Confirmed Feishu send was not globally broken: OpenWrt progress logs showed successful Feishu `update` calls after the user report.
+- Root cause: session mirror kept editing the previous turn's progress-card message ids, so new streaming output did not appear at the bottom of the Feishu chat.
+- Updated `scripts/patch_openwrt_feishu_session_progress.py` to add `clear_feishu_session_progress_mirror`.
+- OpenWrt bridge now clears the session/chat progress-card binding whenever a new `vscode/user` event arrives.
+- Existing `vscode/assistant` events still stream by editing the current turn's progress card.
+- Existing `vscode/final` handling still converts the current progress card to completed, or sends a normal final mirror if no progress card exists.
+- Cleared the stale live progress-card bindings once after deployment so the current turn stopped editing old cards.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_session_progress.py` passed.
+- OpenWrt deployment patched both bridge copies and remote `py_compile` passed.
+- OpenWrt bridge restarted successfully and `/health` returned `ok: true`.
+- Deployed bridge contains:
+  - `def clear_feishu_session_progress_mirror`;
+  - `elif etype == 'vscode/user'` reset path.
+- After clearing stale state, the next mirrored assistant event created fresh Feishu cards with `action: send`:
+  - group `om_x100b5015a2ce7d30c2a1905cbd25124`;
+  - private `om_x100b5015a2c030a4c49a58c8797d6ba`.
+
 ### 061 Recover Feishu Replies For Guidance Tasks After Bridge Restart
 
 Status: completed

@@ -30,6 +30,26 @@ MIRROR_BLOCK = r'''def send_feishu_session_mirror(chat_id, message, event=None):
 def feishu_session_progress_key(chat_id, session_id):
     return normalize_feishu_chat_id('feishu',chat_id,'')+'|'+str(session_id or '')
 
+def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
+    target=normalize_feishu_chat_id('feishu',chat_id,'')
+    if not target:
+        return ''
+    state=load_feishu_session_mirror_state()
+    progress=state.setdefault('progress_messages',{})
+    key=feishu_session_progress_key(chat_id,session_id)
+    old=progress.pop(key,None)
+    if old:
+        save_feishu_session_mirror_state(state)
+        append(STATE/'feishu-session-progress-mirror.log',json.dumps({
+            'ts':now(),
+            'action':'clear',
+            'target':target,
+            'session_id':session_id,
+            'event_id':(event or {}).get('event_id') if isinstance(event,dict) else None,
+            'progress_message_id':old,
+        },ensure_ascii=False))
+    return old or ''
+
 def send_feishu_session_progress_mirror(chat_id, session_id, message, event=None, done=False, error=False):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
     if not target:
@@ -79,7 +99,7 @@ def feishu_session_mirror_text(ev):
 
 
 WATCH_BLOCK = r'''def watch_feishu_session_events():
-    interval=max(1.0,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_INTERVAL','2.0')))
+    interval=max(0.2,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_INTERVAL','0.5')))
     tail=max(20,min(300,int(os.environ.get('CODEX_FLEET_SESSION_MIRROR_TAIL','100'))))
     binding_ttl=max(5.0,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_BINDING_TTL','20')))
     state=load_feishu_session_mirror_state()
@@ -105,7 +125,21 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                         newest=eid
                     if eid <= seen:
                         continue
-                    if ev.get('task_id'):
+                    task_id=str(ev.get('task_id') or '').strip()
+                    if task_id:
+                        etype=str(ev.get('type') or '')
+                        if etype not in ('task/final','task/completed'):
+                            continue
+                        task=fleet_task_status(task_id) or {}
+                        chat_id=str(task.get('chat_id') or '').strip()
+                        if not chat_id or not is_feishu_channel(task.get('chat_channel')):
+                            continue
+                        text=str(ev.get('message') or '').strip()
+                        if not text:
+                            continue
+                        target=normalize_feishu_chat_id('feishu',chat_id,'')
+                        if target and mark_task_final_notification(task_id,target,eid):
+                            send_feishu_session_mirror(chat_id,text,ev)
                         continue
                     sid=str(ev.get('session_id') or '').strip()
                     if sid not in session_to_chats:
@@ -124,6 +158,9 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                                 send_feishu_session_progress_mirror(chat_id,sid,text,ev,done=True)
                             else:
                                 send_feishu_session_mirror(chat_id,text,ev)
+                        elif etype == 'vscode/user':
+                            clear_feishu_session_progress_mirror(chat_id,sid,ev)
+                            send_feishu_session_mirror(chat_id,text,ev)
                         else:
                             send_feishu_session_mirror(chat_id,text,ev)
                 if newest > seen:
