@@ -18,6 +18,47 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 055 Edit Feishu Progress Card For Long Tasks
+
+Status: completed
+
+Planned actions:
+
+1. Confirm Feishu supports message editing through the official edit-message API.
+2. Treat `vscode/assistant` and progress-style worker events as task progress.
+3. For Feishu-origin tasks, create a compact progress card once progress accumulates.
+4. Update the same Feishu message when more progress arrives instead of sending many messages.
+5. On completion, edit the progress card to completed state; if no progress card exists, keep the existing final message behavior.
+6. Deploy to OpenWrt, restart the bridge, and smoke test send-plus-edit behavior.
+
+Result:
+
+- Confirmed Feishu has an official edit-message API and verified it live with the current app.
+- Added `scripts/patch_openwrt_feishu_progress_edit.py`.
+- Added Feishu progress card helpers to the OpenWrt bridge:
+  - `build_feishu_progress_card`;
+  - `send_feishu_card_api`;
+  - `update_feishu_message_api`;
+  - `feishu_progress_message_id`.
+- Task progress watcher now treats `vscode/assistant` as progress, in addition to existing delta/progress-report event types.
+- For Feishu-origin tasks:
+  - progress is buffered;
+  - first visible progress creates one compact progress card;
+  - later progress edits the same message at a throttled interval;
+  - completion/error/cancel updates that same card when it exists;
+  - fast tasks with no progress card keep the old final-message behavior.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_progress_edit.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Live Feishu progress-card smoke:
+  - sent progress card message `om_x100b50144a2a90a4c2aff738bb25030`;
+  - updated the same message through the edit API;
+  - update returned `rc=0`, `action=update`, and `progressCard=true`.
+
 ### 054 Compact VS Code User Mirror Feishu Cards
 
 Status: completed
