@@ -18,6 +18,43 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 061 Recover Feishu Replies For Guidance Tasks After Bridge Restart
+
+Status: completed
+
+Planned actions:
+
+1. Confirm whether the missing Feishu reply reached fleet manager and whether OpenWrt outbound queue sent it.
+2. Make guidance messages start a watcher again, but prevent duplicate final replies with a task-level final notification guard.
+3. Add a session-mirror fallback for task final/completed events so bridge restarts do not lose completed task replies.
+4. Deploy the OpenWrt bridge patch, restart bridge, replay the missed latest final answer, and verify outbound queue sends it.
+
+Result:
+
+- Confirmed the missing reply was not a Codex/worker failure:
+  - fleet manager had task `task-1e7e51c6a545`;
+  - final events `657`/`659` existed with the expected answer;
+  - OpenWrt outbound queue had no row for that final answer before replay.
+- Root cause: the message was a `guidance` turn reusing an existing task. The bridge had skipped starting a guidance watcher to avoid duplicates, and a bridge restart killed the original watcher before the final answer arrived.
+- Added `scripts/patch_openwrt_feishu_task_recovery.py`.
+- OpenWrt bridge now has:
+  - a persistent task-final notification guard in `feishu-task-final-notify.json`;
+  - guidance watchers enabled again;
+  - bootstrap progress disabled for guidance watcher to avoid creating a second progress card;
+  - session mirror fallback for `task/final` and `task/completed` events from Feishu chat tasks.
+- Replayed the missed final answer for task `task-1e7e51c6a545`.
+
+Evidence:
+
+- OpenWrt deployed bridge `py_compile` passed.
+- OpenWrt bridge `/health` returned `ok: true`.
+- Replayed outbound queue row:
+  - `id=110`;
+  - `event_key=fleet-session:659:oc_7aebc9ba04e7e23b3893c85d5cbf360b`;
+  - `status=sent`;
+  - `sent_at=2026-04-29T14:28:33.258395+00:00`.
+- Outbound queue count increased to `sent=76`.
+
 ### 060 Feishu Guidance Messages Steer Running VS Code Turn
 
 Status: completed
