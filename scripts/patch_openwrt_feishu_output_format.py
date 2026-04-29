@@ -120,8 +120,29 @@ def feishu_card_text(value, limit=160):
         text=text[:limit-1]+'…'
     return text
 
-def feishu_card_markdown(value, limit=1800):
+def normalize_feishu_card_markdown(value):
     text=str(value or '').strip()
+    if not text:
+        return ''
+    labels='普通文本|表格|代码|行内代码|链接|列表|编号列表|引用|强调|任务列表'
+    text=re.sub(r'([：:])\s+('+labels+r')：', r'\1\n\2：', text)
+    text=re.sub(r'\s+('+labels+r')：', r'\n\1：', text)
+    text=re.sub(r'```([A-Za-z0-9_+.-]*)\s+([^`\n][\s\S]*?)\s+```', lambda m: '```'+m.group(1)+'\n'+m.group(2).strip()+'\n```', text)
+    text=re.sub(r'(代码：)\s*```', r'\1\n```', text)
+    text=re.sub(r'```\s*(行内代码：|链接：|列表：|编号列表：|引用：|强调：|任务列表：)', r'```\n\1', text)
+    text=re.sub(r'(列表：)\s*-\s+', r'\1\n- ', text)
+    text=re.sub(r'(任务列表：)\s*-\s+(\[[ xX]\])\s+', r'\1\n- \2 ', text)
+    text=re.sub(r'(编号列表：)\s*([0-9]{1,2})[.、]\s+', r'\1\n\2. ', text)
+    text=re.sub(r'(引用：)\s*>\s+', r'\1\n> ', text)
+    text=re.sub(r'(?<!^)(?<!\n)\s+-\s+(\[[ xX]\])\s+', r'\n- \1 ', text)
+    text=re.sub(r'(?<!^)(?<!\n)\s+-\s+', r'\n- ', text)
+    text=re.sub(r'(?<!^)(?<!\n)\s+([0-9]{1,2})[.、]\s+', r'\n\1. ', text)
+    text=re.sub(r'\n{3,}', '\n\n', text)
+    lines=[line.rstrip() for line in text.splitlines()]
+    return '\n'.join(lines).strip()
+
+def feishu_card_markdown(value, limit=1800):
+    text=normalize_feishu_card_markdown(value)
     if not text:
         return ''
     if len(text) > limit:

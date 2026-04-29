@@ -18,6 +18,40 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 052 Restore Line Breaks In Feishu Card Markdown Blocks
+
+Status: completed
+
+Planned actions:
+
+1. Use the mixed-content `测试` output as the regression sample.
+2. Keep the Feishu card `table` component unchanged.
+3. Normalize compact one-line markdown blocks before inserting them into card `markdown` elements.
+4. Restore line breaks around common labels, code fences, bullets, numbered lists, quotes, and task lists.
+5. Deploy to OpenWrt, restart the bridge, and verify the generated card suffix is multiline.
+
+Result:
+
+- Added card-only markdown normalization before content is inserted into Feishu card `markdown` elements.
+- Kept the `table` component unchanged.
+- Restored line breaks around:
+  - compact section labels such as `普通文本：` / `代码：` / `链接：`;
+  - fenced code blocks;
+  - bullets;
+  - numbered lists;
+  - quotes;
+  - task-list items.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed card builder now emits multiline markdown body:
+  - prefix contains `下面是常见消息类型样例：\n普通文本：...\n表格：`;
+  - suffix contains multiline `代码：`, code fence, `链接：`, `列表：`, `编号列表：`, `引用：`, and `任务列表：`.
+
 ### 051 Remove Duplicated Feishu Card Prefix Title
 
 Status: completed
