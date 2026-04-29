@@ -18,6 +18,43 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 049 Send Markdown Tables As Feishu Cards
+
+Status: completed
+
+Planned actions:
+
+1. Preserve the Git rollback point before changing runtime behavior.
+2. Add Markdown table parsing that can feed both text fallback and card payloads.
+3. Extend the Feishu fast API sender to send an `interactive` card when a Markdown table is detected.
+4. Keep text fallback for non-table messages and for card send failures.
+5. Deploy to OpenWrt, restart the bridge, and verify the deployed payload builder with the screenshot-style table.
+
+Result:
+
+- Created and pushed Git rollback tag `backup-before-feishu-card-table-20260429-202229`.
+- Reworked the Feishu formatter patch so Markdown table parsing feeds both:
+  - text fallback formatting;
+  - Feishu Card JSON 2.0 `table` payloads.
+- Changed Feishu queue/direct sends to pass the original message into `send_feishu_api`.
+- `send_feishu_api` now:
+  - detects Markdown tables;
+  - sends `msg_type=interactive` with a card `table` component;
+  - falls back to normal text formatting if card send fails or the message has no table.
+- Deployed to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed builder emits a card body whose first element is `tag=table` with `columns` and `rows`.
+- Live Feishu API smoke to active Codex group returned:
+  - `rc=0`;
+  - `msgType=interactive`;
+  - `cardTable=true`;
+  - message id `om_x100b502bc3f2d910c2b7e4a898ad5c4`.
+
 ### 048 Convert Markdown Tables For Feishu Text
 
 Status: completed

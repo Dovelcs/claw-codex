@@ -25,10 +25,11 @@ def clean_feishu_inline_text(value):
 def is_markdown_table_separator_cell(value):
     return bool(re.fullmatch(r':?-{2,}:?', clean_feishu_inline_text(value)))
 
-def markdown_table_to_feishu_text(text):
+def parse_markdown_table_message(message):
+    text=str(message or '').strip()
     sep=re.search(r'\|\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)+\|', text)
     if not sep:
-        return text, False
+        return None
 
     start=text.rfind('\n',0,sep.start())+1
     prefix=text[:start].rstrip()
@@ -36,7 +37,7 @@ def markdown_table_to_feishu_text(text):
     cells=[clean_feishu_inline_text(cell) for cell in table_text.split('|')]
     cells=[cell for cell in cells if cell]
     if len(cells) < 5:
-        return text, False
+        return None
 
     sep_start=-1
     sep_end=-1
@@ -51,15 +52,15 @@ def markdown_table_to_feishu_text(text):
             sep_end=end
             break
     if sep_start < 0:
-        return text, False
+        return None
 
     column_count=sep_end-sep_start
     if sep_start < column_count:
-        return text, False
+        return None
     headers=cells[sep_start-column_count:sep_start]
     body_cells=cells[sep_end:]
     if not headers or not body_cells:
-        return text, False
+        return None
 
     rows=[]
     for idx in range(0,len(body_cells),column_count):
@@ -68,7 +69,16 @@ def markdown_table_to_feishu_text(text):
             continue
         rows.append(row)
     if not rows:
+        return None
+    return {'prefix':prefix,'headers':headers,'rows':rows,'column_count':column_count}
+
+def markdown_table_to_feishu_text(text):
+    parsed=parse_markdown_table_message(text)
+    if not parsed:
         return text, False
+    prefix=parsed.get('prefix') or ''
+    headers=parsed.get('headers') or []
+    rows=parsed.get('rows') or []
 
     out=[]
     for row in rows:
@@ -87,6 +97,67 @@ def markdown_table_to_feishu_text(text):
     if prefix:
         converted=prefix+'\n'+converted
     return converted, True
+
+def feishu_card_text(value, limit=160):
+    text=clean_feishu_inline_text(value)
+    if len(text) > limit:
+        text=text[:limit-1]+'…'
+    return text
+
+def build_feishu_table_card(message):
+    parsed=parse_markdown_table_message(message)
+    if not parsed:
+        return None
+    headers=[feishu_card_text(h,40) or f'列{i+1}' for i,h in enumerate(parsed.get('headers') or [])]
+    rows=parsed.get('rows') or []
+    if not headers or not rows:
+        return None
+    columns=[]
+    for idx,header in enumerate(headers[:12]):
+        columns.append({
+            'name':f'col_{idx}',
+            'display_name':header,
+            'data_type':'text',
+            'width':'auto',
+            'vertical_align':'top',
+            'horizontal_align':'left',
+        })
+    card_rows=[]
+    for row in rows[:50]:
+        item={}
+        for idx,_header in enumerate(headers[:12]):
+            item[f'col_{idx}']=feishu_card_text(row[idx] if idx < len(row) else '',260)
+        card_rows.append(item)
+    if not card_rows:
+        return None
+    title=feishu_card_text(parsed.get('prefix') or 'Codex 表格',60)
+    return {
+        'schema':'2.0',
+        'config':{'wide_screen_mode':True},
+        'header':{
+            'template':'blue',
+            'title':{'tag':'plain_text','content':title},
+        },
+        'body':{
+            'direction':'vertical',
+            'elements':[{
+                'tag':'table',
+                'page_size':min(10,max(1,len(card_rows))),
+                'row_height':'auto',
+                'freeze_first_column':len(columns) > 2,
+                'header_style':{
+                    'text_align':'left',
+                    'text_size':'normal',
+                    'background_style':'grey',
+                    'text_color':'default',
+                    'bold':True,
+                    'lines':1,
+                },
+                'columns':columns,
+                'rows':card_rows,
+            }],
+        },
+    }
 
 def format_feishu_outbound_text(message):
     text=str(message or '').strip()
@@ -119,6 +190,50 @@ def format_feishu_outbound_text(message):
 '''
 
 
+SEND_BLOCK = r'''def send_feishu_api(msg,target,account='default'):
+    token,cfg=feishu_tenant_token(account)
+    receive_id_type='chat_id' if str(target or '').startswith('oc_') else 'open_id'
+    url=feishu_api_base(cfg.get('domain')) + '/im/v1/messages?receive_id_type=' + receive_id_type
+
+    def post_message(body):
+        req=urllib.request.Request(url,data=json.dumps(body,ensure_ascii=False).encode(),headers={'Content-Type':'application/json','Authorization':'Bearer '+token},method='POST')
+        with urllib.request.urlopen(req,timeout=20) as resp:
+            return json.loads(resp.read().decode())
+
+    original_msg=str(msg)
+    card=build_feishu_table_card(original_msg)
+    if card:
+        body={'receive_id':target,'msg_type':'interactive','content':json.dumps(card,ensure_ascii=False)}
+        try:
+            payload=post_message(body)
+            ok=int(payload.get('code') or 0) == 0
+            if ok:
+                data=payload.get('data') or {}
+                message_id=data.get('message_id') or data.get('messageId') or ''
+                rec_payload={'ok':True,'channel':'feishu','action':'send','messageId':message_id,'chatId':target,'fastApi':True,'msgType':'interactive','cardTable':True}
+                return {'ts':now(),'rc':0,'channel':'feishu','account':account,'target':target,'stdout':json.dumps({'payload':rec_payload},ensure_ascii=False),'stderr':'','message':format_feishu_outbound_text(original_msg),'card':card,'fast_api':True}
+            card_error=str(payload.get('msg') or payload)
+        except Exception as e:
+            card_error=repr(e)
+    else:
+        card_error=''
+
+    text=format_feishu_outbound_text(original_msg)
+    content=json.dumps({'text':text},ensure_ascii=False)
+    body={'receive_id':target,'msg_type':'text','content':content}
+    payload=post_message(body)
+    ok=int(payload.get('code') or 0) == 0
+    data=payload.get('data') or {}
+    message_id=data.get('message_id') or data.get('messageId') or ''
+    rec_payload={'ok':ok,'channel':'feishu','action':'send','messageId':message_id,'chatId':target,'fastApi':True,'msgType':'text'}
+    if card_error:
+        rec_payload['cardFallbackError']=card_error
+    rc=0 if ok else 1
+    return {'ts':now(),'rc':rc,'channel':'feishu','account':account,'target':target,'stdout':json.dumps({'payload':rec_payload},ensure_ascii=False),'stderr':'','message':text,'fast_api':True}
+
+'''
+
+
 def patch_file(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     original = text
@@ -127,7 +242,9 @@ def patch_file(path: Path) -> None:
     shutil.copy2(path, backup)
 
     if "def format_feishu_outbound_text(" in text:
-        start = text.find("def markdown_table_to_feishu_text(")
+        start = text.find("def clean_feishu_inline_text(")
+        if start < 0:
+            start = text.find("def markdown_table_to_feishu_text(")
         if start < 0:
             start = text.find("def format_feishu_outbound_text(")
         end = text.find("def hash_text(value):\n", start)
@@ -137,13 +254,19 @@ def patch_file(path: Path) -> None:
     else:
         text = text.replace("def hash_text(value):\n", FORMAT_BLOCK + "def hash_text(value):\n")
 
+    send_start = text.find("def send_feishu_api(")
+    send_end = text.find("def send_openclaw_channel(", send_start)
+    if send_start < 0 or send_end < 0:
+        raise RuntimeError(f"send_feishu_api/send_openclaw_channel marker not found in {path}")
+    text = text[:send_start] + SEND_BLOCK + text[send_end:]
+
     text = text.replace(
-        "return send_feishu_api(row.get('message') or '',row.get('target') or '',row.get('account') or 'default')",
         "return send_feishu_api(format_feishu_outbound_text(row.get('message') or ''),row.get('target') or '',row.get('account') or 'default')",
+        "return send_feishu_api(row.get('message') or '',row.get('target') or '',row.get('account') or 'default')",
     )
     text = text.replace(
-        "rec=send_feishu_api(msg,target,account)",
         "rec=send_feishu_api(format_feishu_outbound_text(msg),target,account)",
+        "rec=send_feishu_api(msg,target,account)",
     )
 
     if text == original:
