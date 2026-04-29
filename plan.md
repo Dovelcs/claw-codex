@@ -18,6 +18,38 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 048 Convert Markdown Tables For Feishu Text
+
+Status: completed
+
+Planned actions:
+
+1. Keep Feishu text-message transport, avoiding card payload risk for now.
+2. Detect compact Markdown tables in outbound Feishu text.
+3. Convert tables into readable field-list text for Feishu.
+4. Apply the formatter to both queued dispatcher sends and direct Feishu sends.
+5. Deploy, restart, and verify with the exact compact table shape from the screenshot.
+
+Result:
+
+- Kept the current Feishu text-message transport; did not switch to card/table payloads.
+- Extended `scripts/patch_openwrt_feishu_output_format.py` with compact Markdown table detection.
+- Markdown tables are converted into readable field-list text before sending to Feishu.
+- Formatter now runs on both outbound queue dispatcher sends and direct Feishu API sends.
+- Preserved numeric text inside table cells such as `1. 2. 3.` instead of treating it as a numbered list.
+- Deployed the patch to OpenWrt and restarted the bridge.
+
+Evidence:
+
+- Local `python3 -m py_compile scripts/patch_openwrt_feishu_output_format.py` passed.
+- Remote `python3 -m py_compile` passed for both deployed bridge files.
+- Bridge health after restart reports `ok=true` and `outbound_queue`.
+- Deployed formatter converts the screenshot-style compact Markdown table into:
+  - `- Feishu 输出格式`
+  - `  状态：已启用`
+  - `  说明：出队发送前自动美化文本`
+  - and equivalent field blocks for the remaining rows.
+
 ### 047 Beautify Feishu Output Formatting
 
 Status: completed
