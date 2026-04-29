@@ -3,7 +3,7 @@ import readline from "node:readline";
 import { BridgeController } from "../bridge/controller.js";
 import type { AppServerClientOptions } from "../appserver/client.js";
 import type { ThreadSummary } from "../appserver/types.js";
-import { FleetManagerClient, type FleetCommand, type FleetCommandResult, type FleetEvent, type FleetSession } from "../fleet/manager-client.js";
+import { FleetManagerClient, type FleetChatBinding, type FleetCommand, type FleetCommandResult, type FleetEvent, type FleetSession } from "../fleet/manager-client.js";
 import { watchRolloutTask, type RolloutTaskEvent } from "../fleet/rollout-monitor.js";
 import { CodexSessionScanner, mergeFleetSessions } from "../fleet/session-scanner.js";
 
@@ -363,7 +363,7 @@ export class WorkerAgent {
 
     const bound = new Set(
       bindings
-        .filter((binding) => isFeishuChannel(binding.channel))
+        .filter(shouldMirrorFeishuBinding)
         .map((binding) => stringValue(binding.session_id))
         .filter((sessionId): sessionId is string => Boolean(sessionId))
     );
@@ -726,6 +726,14 @@ function taskMirrorSuppressionKey(threadId: string, kind: RolloutTaskEvent["kind
 function isFeishuChannel(value: unknown): boolean {
   const channel = String(value ?? "").trim().toLowerCase();
   return channel === "feishu" || channel.endsWith("feishu");
+}
+
+function isFeishuGroupChatId(value: unknown): boolean {
+  return String(value ?? "").trim().startsWith("oc_");
+}
+
+export function shouldMirrorFeishuBinding(binding: FleetChatBinding): boolean {
+  return isFeishuChannel(binding.channel) && isFeishuGroupChatId(binding.chat_id);
 }
 
 function isDisabled(value: unknown): boolean {

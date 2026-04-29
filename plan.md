@@ -18,6 +18,43 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 064 Land Feishu Group-Only Routing And Unified Bridge Deploy
+
+Status: completed
+
+Planned actions:
+
+1. Update the company worker so Feishu session mirrors only consider group chat bindings (`oc_...`) and private/direct bindings cannot consume mirror slots.
+2. Update the OpenWrt bridge guidance route so non-group Feishu chats cannot create or guide company Codex tasks.
+3. Add a single OpenWrt bridge deploy helper that runs the known patch sequence, checks required symbols, clears non-group live progress bindings, restarts bridge, and verifies health.
+4. Run local tests, deploy the route fix to OpenWrt, restart bridge, rebuild/restart worker, verify manager/bridge health, then commit and push.
+
+Result:
+
+- Company worker now mirrors only Feishu group bindings:
+  - added `shouldMirrorFeishuBinding`;
+  - `ensureSessionMirrors` ignores `ou_...` and `default:direct:ou_...` bindings so they cannot consume the mirror slot limit.
+- OpenWrt route layer now rejects non-group Feishu chats before company Codex task creation:
+  - `/绑定` private/direct chat returns empty;
+  - session-entry send private/direct chat returns empty;
+  - normal bound-chat routing private/direct chat returns empty.
+- Added `scripts/patch_openwrt_feishu_group_only_routes.py` for route-level group-only policy.
+- Added `scripts/deploy_openwrt_codex_bridge.py` to apply the full OpenWrt patch sequence in order, verify required markers, clear non-group progress bindings, restart the bridge, and run health check.
+- Deployed the full OpenWrt patch sequence through the unified helper and restarted the company worker through the watchdog.
+
+Evidence:
+
+- `npm test` passed: 30 tests.
+- `python3 -m unittest fleet_manager/test_codex_fleet_manager.py` passed: 9 tests.
+- `python3 -m py_compile` passed for the touched OpenWrt patch/deploy scripts.
+- Unified OpenWrt deploy helper completed with `ok: true`.
+- Private Feishu route smoke returned empty for:
+  - `route_to_bound_chat`;
+  - `bind_chat_to_project`;
+  - `route_feishu_session_entry`.
+- OpenWrt bridge `/health` returned `ok: true`.
+- Fleet manager reports `company-main` online after worker restart.
+
 ### 063 Disable Feishu Private Session Mirrors
 
 Status: completed

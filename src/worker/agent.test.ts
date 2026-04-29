@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { shouldUseVscodeIpcForSession, threadToFleetSession, workerAppServerOptions } from "./agent.js";
+import { shouldMirrorFeishuBinding, shouldUseVscodeIpcForSession, threadToFleetSession, workerAppServerOptions } from "./agent.js";
 
 test("threadToFleetSession exposes stable public fields", () => {
   assert.deepEqual(threadToFleetSession({
@@ -51,4 +51,32 @@ test("workerAppServerOptions pins explicit socket ahead of ambient app-server UR
     appServerUrl: "ws://127.0.0.1:18999",
     socketPath: undefined
   });
+});
+
+test("shouldMirrorFeishuBinding only accepts Feishu group chats", () => {
+  assert.equal(shouldMirrorFeishuBinding({
+    channel: "feishu",
+    chat_id: "oc_group",
+    session_id: "thread-1"
+  }), true);
+  assert.equal(shouldMirrorFeishuBinding({
+    channel: "openclaw-feishu",
+    chat_id: "oc_group",
+    session_id: "thread-1"
+  }), true);
+  assert.equal(shouldMirrorFeishuBinding({
+    channel: "feishu",
+    chat_id: "ou_private",
+    session_id: "thread-1"
+  }), false);
+  assert.equal(shouldMirrorFeishuBinding({
+    channel: "feishu",
+    chat_id: "default:direct:ou_private:thread:om_message",
+    session_id: "thread-1"
+  }), false);
+  assert.equal(shouldMirrorFeishuBinding({
+    channel: "openclaw-weixin",
+    chat_id: "oc_group",
+    session_id: "thread-1"
+  }), false);
 });

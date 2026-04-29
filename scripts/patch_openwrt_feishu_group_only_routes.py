@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch OpenWrt bridge so Feishu guidance messages do not spawn duplicate task watchers."""
+"""Patch OpenWrt bridge so company Codex routing only accepts Feishu groups."""
 
 from __future__ import annotations
 
@@ -14,7 +14,47 @@ TARGETS = [
 ]
 
 
-ROUTE_BLOCK = r'''def route_to_bound_chat(text, session_key='', run_dir=None, channel='', chat_id='', retry=False):
+ROUTE_FEISHU_SESSION_ENTRY = r'''def route_feishu_session_entry(text, session_key='', run_dir=None, channel='', chat_id=''):
+    if not is_feishu_channel(channel):
+        return ''
+    if not is_feishu_group_target(channel,chat_id,session_key):
+        return ''
+    selector,prompt=parse_session_entry_send(text)
+    if selector and prompt:
+        channel,owner=feishu_owner_chat_id(channel,chat_id,session_key)
+        result=fleet_api('/api/session-chats/task',method='POST',body={'channel':channel,'owner_chat_id':owner,'selector':selector,'prompt':prompt})
+        task=(result or {}).get('task') or {}
+        mapping=(result or {}).get('mapping') or {}
+        binding=(mapping or {}).get('binding') or {}
+        task_id=task.get('task_id') or ''
+        if task_id:
+            start_fleet_completion_watcher(task_id,{'session_id':binding.get('session_id'),'project':binding.get('project_alias'),'source':'session-entry'},run_dir)
+        return f'已发送到 Codex 会话 {selector}：{task_id or "queued"}'
+    ch,cid=chat_identity(channel,chat_id,session_key)
+    if ':thread:' in str(cid):
+        routed=route_to_bound_chat(text,session_key,run_dir,ch,cid)
+        if routed:
+            return routed
+    return ''
+
+'''
+
+
+BIND_CHAT_TO_PROJECT = r'''def bind_chat_to_project(text, session_key='', channel='', chat_id=''):
+    alias=parse_chat_bind_request(text)
+    if not alias:
+        return ''
+    if is_feishu_channel(channel) and not is_feishu_group_target(channel,chat_id,session_key):
+        return ''
+    channel,chat_id=chat_identity(channel,chat_id,session_key)
+    body={'channel':channel,'chat_id':chat_id,'profile':session_key,'project_alias':alias}
+    binding=fleet_api('/api/chat-bindings',method='POST',body=body)
+    return f'已绑定当前聊天窗口到公司工程：{binding.get("project_alias") or alias}\n后续普通消息会直接发送到该工程；可用 /状态、/停止、/解绑。'
+
+'''
+
+
+ROUTE_TO_BOUND_CHAT = r'''def route_to_bound_chat(text, session_key='', run_dir=None, channel='', chat_id='', retry=False):
     if not should_route_to_active_fleet(text): return ''
     if is_feishu_channel(channel) and not is_feishu_group_target(channel,chat_id,session_key):
         return ''
@@ -58,10 +98,27 @@ def patch_file(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     original = text
     stamp = time.strftime("%Y%m%d%H%M%S")
-    backup = path.with_name(path.name + f".bak-feishu-guidance-{stamp}")
+    backup = path.with_name(path.name + f".bak-feishu-group-routes-{stamp}")
     shutil.copy2(path, backup)
 
-    text = replace_between(text, "def route_to_bound_chat(text, session_key='', run_dir=None, channel='', chat_id='', retry=False):\n", "\ndef load_feishu_session_mirror_state", ROUTE_BLOCK)
+    text = replace_between(
+        text,
+        "def route_feishu_session_entry(text, session_key='', run_dir=None, channel='', chat_id=''):\n",
+        "def parse_chat_bind_request",
+        ROUTE_FEISHU_SESSION_ENTRY,
+    )
+    text = replace_between(
+        text,
+        "def bind_chat_to_project(text, session_key='', channel='', chat_id=''):\n",
+        "def unbind_chat_project",
+        BIND_CHAT_TO_PROJECT,
+    )
+    text = replace_between(
+        text,
+        "def route_to_bound_chat(text, session_key='', run_dir=None, channel='', chat_id='', retry=False):\n",
+        "\ndef load_feishu_session_mirror_state",
+        ROUTE_TO_BOUND_CHAT,
+    )
 
     if text == original:
         print(f"unchanged {path}")
