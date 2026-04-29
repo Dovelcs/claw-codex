@@ -18,6 +18,57 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 057 Install Boot Autostart For Fleet Bridge Services
+
+Status: completed
+
+Planned actions:
+
+1. Preserve current runtime commands and config files instead of inventing new service arguments.
+2. Add company-machine autostart for fleet-agent watchdog and log monitor.
+3. Add OpenWrt boot autostart for fleet manager, OpenClaw bridge server, and Feishu session-group provisioner.
+4. Keep OpenWrt Docker container restart policy enabled.
+5. Install and verify the startup entries without rebooting the machines.
+
+Result:
+
+- Added company-machine autostart helpers:
+  - `scripts/start-codex-fleet-log-monitor.sh`;
+  - `scripts/install-company-autostart.sh`.
+- Installed company-machine user systemd services:
+  - `codex-fleet-agent-watchdog.service`;
+  - `codex-fleet-log-monitor.service`.
+- Added company-machine crontab `@reboot` fallback entries for the same two services.
+- Confirmed current company worker watchdog, worker agent, and log monitor are running.
+- Added OpenWrt autostart script:
+  - `scripts/openwrt-codex-fleet-autostart.sh`.
+- Deployed it to OpenWrt as `/root/codex-fleet-autostart.sh`.
+- Hooked it into `/etc/rc.local` before `exit 0`.
+- OpenWrt autostart now ensures:
+  - `dockerd` is enabled/started;
+  - `openclaw-gateway-v2` has restart policy `unless-stopped`;
+  - fleet manager is started if missing;
+  - container bridge server is started if missing;
+  - Feishu session-group provisioner is started if missing.
+
+Evidence:
+
+- Local shell syntax check passed for all new startup scripts.
+- Company user systemd reports both services `enabled`.
+- Company crontab contains the `BEGIN CODEX FLEET AUTOSTART` block.
+- Company processes include:
+  - `fleet-agent-watchdog.sh`;
+  - `dist/cli.js worker agent`;
+  - `codex-fleet-log-monitor.sh`.
+- OpenWrt `/etc/rc.local` now starts `/root/codex-fleet-autostart.sh`.
+- OpenWrt autostart script ran successfully and logged `autostart done`.
+- Docker reports `/openclaw-gateway-v2 restart=unless-stopped`.
+- Container processes include:
+  - `codex_bridge_server.py --listen 127.0.0.1 --port 18991`;
+  - `feishu_auto_session_groups.sh`.
+- Bridge `/health` reports `ok=true`.
+- Fleet manager `/api/endpoints` reports `company-main` online.
+
 ### 056 Stream VS Code Manual Session Replies To Feishu
 
 Status: completed
