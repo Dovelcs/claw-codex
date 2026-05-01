@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import runpy
+import shutil
 import signal
 import subprocess
 import sys
@@ -44,6 +45,10 @@ REQUIRED_MARKERS = [
     "if is_feishu_channel(channel) and not is_feishu_group_target(channel,chat_id,session_key):",
     "def is_company_fleet_channel(",
 ]
+HELPER_SCRIPTS = [
+    "feishu_provision_session_groups.py",
+    "feishu_auto_session_groups.sh",
+]
 
 
 def run_patch(path: Path) -> None:
@@ -76,6 +81,37 @@ def clear_non_group_progress_bindings() -> None:
             data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
             state_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             print(f"removed non-group progress bindings from {state_path}: {len(removed)}")
+
+
+def sync_helper_scripts(here: Path) -> None:
+    scripts_dir = CONTAINER_STATE / "scripts"
+    scripts_dir.mkdir(parents=True, exist_ok=True)
+    for name in HELPER_SCRIPTS:
+        source = here / name
+        if not source.exists():
+            raise SystemExit(f"missing helper script next to deploy helper: {name}")
+        target = scripts_dir / name
+        shutil.copy2(source, target)
+        target.chmod(0o755)
+        print(f"synced helper script {target}")
+
+
+def start_auto_session_groups() -> None:
+    subprocess.check_call(
+        "docker exec openclaw-gateway-v2 sh -lc "
+        "'script=/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh; "
+        "running=0; self=$$; "
+        "for p in /proc/[0-9]*; do "
+        "pid=${p#/proc/}; [ \"$pid\" = \"$self\" ] && continue; "
+        "cmd=$(tr \"\\000\" \" \" < \"$p/cmdline\" 2>/dev/null || true); "
+        "case \"$cmd\" in *\"$script\"*) running=1;; esac; "
+        "done; "
+        "if [ -x \"$script\" ] && [ \"$running\" = 0 ]; then "
+        "nohup \"$script\" >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null & "
+        "echo started feishu auto session groups; "
+        "fi'",
+        shell=True,
+    )
 
 
 def restart_bridge() -> None:
@@ -131,11 +167,14 @@ def main() -> None:
 
     for name in PATCH_ORDER:
         run_patch(here / name)
+    sync_helper_scripts(here)
     py_compile(existing_targets)
+    py_compile([CONTAINER_STATE / "scripts" / "feishu_provision_session_groups.py"])
     for target in existing_targets:
         verify_markers(target)
     clear_non_group_progress_bindings()
     restart_bridge()
+    start_auto_session_groups()
     health = bridge_health()
     if not health.get("ok"):
         raise RuntimeError(f"bridge health check failed: {health}")

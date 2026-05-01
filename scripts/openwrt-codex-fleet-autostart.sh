@@ -53,8 +53,19 @@ if ! pgrep -f "^python3 /data/state/codex-bridge/package/server/codex_bridge_ser
   nohup python3 /data/state/codex-bridge/package/server/codex_bridge_server.py --listen 127.0.0.1 --port 18991 >>/data/state/codex-bridge/server.out 2>&1 < /dev/null &
   echo started bridge
 fi
-if [ -x /data/state/codex-bridge/scripts/feishu_auto_session_groups.sh ] && ! pgrep -f "/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh" >/dev/null 2>&1; then
-  nohup /data/state/codex-bridge/scripts/feishu_auto_session_groups.sh >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null &
+script=/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh
+running=0
+self=$$
+for p in /proc/[0-9]*; do
+  pid=${p#/proc/}
+  [ "$pid" = "$self" ] && continue
+  cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true)
+  case "$cmd" in
+    *"$script"*) running=1 ;;
+  esac
+done
+if [ -x "$script" ] && [ "$running" = 0 ]; then
+  nohup "$script" >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null &
   echo started feishu auto session groups
 fi
 ' >> "$LOG" 2>&1 || log "container service start failed"

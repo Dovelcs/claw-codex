@@ -18,6 +18,33 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 069 Restore Safe Feishu Auto Group Creation
+
+Status: completed
+
+Planned actions:
+
+1. Add stateful new-session-only filtering to `scripts/feishu_provision_session_groups.py`.
+2. Add a safe `scripts/feishu_auto_session_groups.sh` loop that baselines existing sessions on first start and only provisions new sessions after that.
+3. Sync/start the safe loop on OpenWrt without bulk-creating historical groups.
+4. Verify the loop is running, the current binding remains intact, and no extra groups are created on startup.
+
+Result:
+
+- Added `--new-sessions-only` and `--state-file` to `scripts/feishu_provision_session_groups.py`.
+- Added `scripts/feishu_auto_session_groups.sh`, which runs provisioning in safe new-session-only mode.
+- Updated deploy/autostart paths to sync and start the safe helper, with `/proc/*/cmdline` process detection instead of fragile `pgrep`.
+- Initialized the OpenWrt state file at `/data/state/codex-bridge/feishu-auto-session-groups-state.json`; startup baseline recorded 129 existing sessions and created 0 groups.
+- Started the safe auto loop on OpenWrt.
+
+Evidence:
+
+- Auto loop is running as `/bin/sh /data/state/codex-bridge/scripts/feishu_auto_session_groups.sh`.
+- Empty-loop logs show `created: []`, `failed: []`, and `openclaw_group_defaults: {}`.
+- Smoke test registered temporary session `smoke-auto-feishu-20260501-1421`; the loop automatically created `oc_769f71c8cc053d704e36e24bf3337eff`.
+- Smoke test cleanup removed the manager binding, deleted the Feishu test group with `code: 0`, removed OpenClaw entries, removed the state entry, and deleted the test session row.
+- Current real session still has one binding: `oc_d733db1a724f074f48628ca726815933`.
+
 ### 068 Provision Current Feishu Session Group Only
 
 Status: completed

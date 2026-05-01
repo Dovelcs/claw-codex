@@ -126,6 +126,49 @@ def apply_openclaw_group_defaults(cfg, chat_ids, owner_open_id, dry_run=False):
     return {"updated_groups": len(chat_ids), "backup": str(backup)}
 
 
+def load_state(path):
+    if not path:
+        return {"seen_session_ids": []}
+    state_path = Path(path)
+    if not state_path.exists():
+        return {"seen_session_ids": []}
+    try:
+        data = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {"seen_session_ids": []}
+    seen = data.get("seen_session_ids")
+    if not isinstance(seen, list):
+        seen = []
+    return {"seen_session_ids": [str(item) for item in seen if item]}
+
+
+def save_state(path, seen_session_ids, dry_run=False):
+    if not path:
+        return {"state_file": "", "seen_sessions": len(seen_session_ids), "dry_run": dry_run}
+    state_path = Path(path)
+    result = {
+        "state_file": str(state_path),
+        "seen_sessions": len(seen_session_ids),
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        return result
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "seen_session_ids": sorted(seen_session_ids),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return result
+
+
 def run_once(args):
     manager = args.manager.rstrip("/")
     cfg = load_feishu_config(args.config)
@@ -139,7 +182,9 @@ def run_once(args):
         for b in bindings
         if str(b.get("chat_id") or "").startswith("oc_")
     }
-    apply_result = apply_openclaw_group_defaults(cfg, group_chat_ids, owner_open_id, args.dry_run)
+    apply_result = {}
+    if not args.new_sessions_only:
+        apply_result = apply_openclaw_group_defaults(cfg, group_chat_ids, owner_open_id, args.dry_run)
     project_by_session = {}
     for b in bindings:
         sid = str(b.get("session_id") or "")
@@ -151,10 +196,26 @@ def run_once(args):
         sid = str(s.get("session_id") or "")
         if sid in project_by_session and not s.get("project_alias"):
             s["project_alias"] = project_by_session[sid]
+    state = load_state(args.state_file) if args.new_sessions_only else {"seen_session_ids": []}
+    seen_session_ids = set(state.get("seen_session_ids") or [])
+    known_session_ids = {str(s.get("session_id") or "") for s in sessions if str(s.get("session_id") or "")}
+    state_result = {}
+
     if args.session_id:
         sessions = [s for s in sessions if str(s.get("session_id") or "") == args.session_id]
         if not sessions:
             raise SystemExit(f"session not found in manager session list: {args.session_id}")
+    elif args.new_sessions_only:
+        if not seen_session_ids:
+            state_result = save_state(args.state_file, known_session_ids, args.dry_run)
+            return {
+                "created": [],
+                "skipped": [],
+                "failed": [],
+                "openclaw_group_defaults": apply_result,
+                "state": {**state_result, "baselined": True},
+            }
+        sessions = [s for s in sessions if str(s.get("session_id") or "") not in seen_session_ids]
     else:
         sessions = sessions[max(args.start - 1, 0):max(args.start - 1, 0) + args.limit]
     existing_by_session = {
@@ -215,8 +276,16 @@ def run_once(args):
     if new_chat_ids:
         fresh_cfg = load_feishu_config(args.config)
         apply_result = apply_openclaw_group_defaults(fresh_cfg, group_chat_ids | set(new_chat_ids), owner_open_id, False)
+    if args.new_sessions_only:
+        state_result = save_state(args.state_file, seen_session_ids | known_session_ids, args.dry_run)
 
-    return {"created": created, "skipped": skipped, "failed": failed, "openclaw_group_defaults": apply_result}
+    return {
+        "created": created,
+        "skipped": skipped,
+        "failed": failed,
+        "openclaw_group_defaults": apply_result,
+        "state": state_result,
+    }
 
 
 def main():
@@ -228,6 +297,8 @@ def main():
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--start", type=int, default=1)
     ap.add_argument("--session-id", default="", help="Provision only the exact manager session id.")
+    ap.add_argument("--new-sessions-only", action="store_true", help="Only provision sessions not already recorded in --state-file.")
+    ap.add_argument("--state-file", default="", help="JSON state file used with --new-sessions-only.")
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--interval", type=float, default=10)
     ap.add_argument("--no-intro", action="store_true")
