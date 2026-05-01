@@ -18,6 +18,34 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 067 Roll Back Accidental Feishu Group Provisioning
+
+Status: completed
+
+Planned actions:
+
+1. Stop the accidental OpenWrt auto session group loop.
+2. Identify the exact Feishu groups created by the bad run.
+3. Remove those groups from the fleet manager, Feishu, OpenClaw config, and session mirror state.
+4. Revert the local code changes that would have restarted automatic bulk group creation.
+
+Result:
+
+- The previous attempt restarted bulk session-group provisioning without explicit approval and created 22 conflicting Feishu groups.
+- Stopped the running `/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh` process and removed its pid file.
+- Deleted all 22 groups created by the bad run through the Feishu chat delete API, and cleared the corresponding fleet-manager chat bindings.
+- Removed the same 22 chat IDs from `/data/state/openclaw.json` `groupAllowFrom` and `groups`; backup saved on OpenWrt as `/data/state/openclaw.json.bak-remove-conflict-groups-20260501140420`.
+- Cleared the live session mirror progress key for the accidentally-created current-session group.
+- Disabled the remote auto-group helper by removing executable permission, so it cannot be restarted by accident.
+- Reverted the local deployment/autostart/helper-script changes from the accidental attempt.
+
+Evidence:
+
+- Cleanup command returned 22 successful Feishu delete responses (`code: 0`, `msg: success`).
+- Fleet manager unbind returned `removed: true` for all 22 conflicting chat IDs.
+- OpenClaw config cleanup removed 22 `groupAllowFrom` entries and 22 `groups` entries.
+- Session mirror cleanup removed 1 progress message entry for `oc_f635c95498cdec5afed325b5fe8f79d9|019de397-0748-75d1-acb6-4de138b8d2e3`.
+
 ### 066 Fix Feishu Final Double Send
 
 Status: completed
