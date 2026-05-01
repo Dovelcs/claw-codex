@@ -15,6 +15,7 @@ while :; do
   python3 "$SCRIPT" \
     --manager "$MANAGER" \
     --config "$CONFIG" \
+    --source vscode \
     --new-sessions-only \
     --state-file "$STATE_FILE" \
     --no-intro >> "$LOG" 2>&1 || true

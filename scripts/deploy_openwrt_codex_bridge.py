@@ -83,17 +83,31 @@ def clear_non_group_progress_bindings() -> None:
             print(f"removed non-group progress bindings from {state_path}: {len(removed)}")
 
 
-def sync_helper_scripts(here: Path) -> None:
-    scripts_dir = CONTAINER_STATE / "scripts"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
+def helper_script_dirs() -> list[Path]:
+    dirs = []
+    if STATE.exists():
+        dirs.append(STATE / "scripts")
+    if CONTAINER_STATE.exists():
+        dirs.append(CONTAINER_STATE / "scripts")
+    if not dirs:
+        raise SystemExit("no codex bridge state directory found for helper scripts")
+    return dirs
+
+
+def sync_helper_scripts(here: Path) -> list[Path]:
+    synced_paths: list[Path] = []
     for name in HELPER_SCRIPTS:
         source = here / name
         if not source.exists():
             raise SystemExit(f"missing helper script next to deploy helper: {name}")
-        target = scripts_dir / name
-        shutil.copy2(source, target)
-        target.chmod(0o755)
-        print(f"synced helper script {target}")
+        for scripts_dir in helper_script_dirs():
+            scripts_dir.mkdir(parents=True, exist_ok=True)
+            target = scripts_dir / name
+            shutil.copy2(source, target)
+            target.chmod(0o755)
+            synced_paths.append(target)
+            print(f"synced helper script {target}")
+    return synced_paths
 
 
 def start_auto_session_groups() -> None:
@@ -108,6 +122,7 @@ def start_auto_session_groups() -> None:
         "done; "
         "if [ -x \"$script\" ] && [ \"$running\" = 0 ]; then "
         "nohup \"$script\" >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null & "
+        "echo $! >/data/state/codex-bridge/feishu-auto-session-groups.pid; "
         "echo started feishu auto session groups; "
         "fi'",
         shell=True,
@@ -167,9 +182,9 @@ def main() -> None:
 
     for name in PATCH_ORDER:
         run_patch(here / name)
-    sync_helper_scripts(here)
+    synced_helpers = sync_helper_scripts(here)
     py_compile(existing_targets)
-    py_compile([CONTAINER_STATE / "scripts" / "feishu_provision_session_groups.py"])
+    py_compile([path for path in synced_helpers if path.suffix == ".py"])
     for target in existing_targets:
         verify_markers(target)
     clear_non_group_progress_bindings()

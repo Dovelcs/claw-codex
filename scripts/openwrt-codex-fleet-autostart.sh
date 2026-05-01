@@ -49,23 +49,23 @@ start_fleet_manager() {
 start_container_services() {
   docker exec "$CONTAINER" sh -lc '
 set -eu
-if ! pgrep -f "^python3 /data/state/codex-bridge/package/server/codex_bridge_server.py" >/dev/null 2>&1; then
+bridge_running=0
+auto_groups_running=0
+for p in /proc/[0-9]*; do
+  [ "${p#/proc/}" = "$$" ] && continue
+  cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true)
+  case "$cmd" in
+    *"python3 /data/state/codex-bridge/package/server/codex_bridge_server.py"*) bridge_running=1 ;;
+    *"/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh"*) auto_groups_running=1 ;;
+  esac
+done
+if [ "$bridge_running" = "0" ]; then
   nohup python3 /data/state/codex-bridge/package/server/codex_bridge_server.py --listen 127.0.0.1 --port 18991 >>/data/state/codex-bridge/server.out 2>&1 < /dev/null &
   echo started bridge
 fi
-script=/data/state/codex-bridge/scripts/feishu_auto_session_groups.sh
-running=0
-self=$$
-for p in /proc/[0-9]*; do
-  pid=${p#/proc/}
-  [ "$pid" = "$self" ] && continue
-  cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true)
-  case "$cmd" in
-    *"$script"*) running=1 ;;
-  esac
-done
-if [ -x "$script" ] && [ "$running" = 0 ]; then
-  nohup "$script" >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null &
+if [ -x /data/state/codex-bridge/scripts/feishu_auto_session_groups.sh ] && [ "$auto_groups_running" = "0" ]; then
+  nohup /data/state/codex-bridge/scripts/feishu_auto_session_groups.sh >>/data/state/codex-bridge/feishu-auto-session-groups.out 2>&1 < /dev/null &
+  echo $! >/data/state/codex-bridge/feishu-auto-session-groups.pid
   echo started feishu auto session groups
 fi
 ' >> "$LOG" 2>&1 || log "container service start failed"

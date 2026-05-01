@@ -18,6 +18,33 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 070 Review Safe Feishu Auto Group Creation
+
+Status: completed
+
+Planned actions:
+
+1. Review the safe auto-group implementation for retry behavior and deployment correctness.
+2. Fix any reliability issues found during review.
+3. Re-run local checks and confirm whether another commit is required.
+
+Result:
+
+- Fixed auto-loop idle behavior so it no longer requests a Feishu tenant token when there are no sessions to create.
+- Fixed retry semantics: failed group creation is not marked seen; if group creation succeeds but manager binding fails, the created chat is stored as pending and later iterations retry binding that same chat instead of creating duplicates.
+- Made `--session-id` and `--new-sessions-only` mutually exclusive to avoid corrupting the auto baseline state.
+- Added `--source` filtering and changed the auto loop to process only `source=vscode` sessions, so `codex review` / exec / subagent sessions do not create Feishu groups.
+- Fixed deploy helper script sync to copy helpers into the actual bridge state dirs and compile the synced helper path.
+- Aligned the repo autostart script with the OpenWrt live script, including `/proc/*/cmdline` detection for bridge and auto-loop processes plus pid file writing.
+
+Evidence:
+
+- Standalone review found and drove fixes for state-baseline mixing and post-create bind failure duplicate groups.
+- The final standalone review found no actionable correctness issues; its nested optional review was blocked by a read-only Codex state DB.
+- Local checks passed: `python3 -m py_compile`, `sh -n`, `git diff --check`, and `python3 -m unittest fleet_manager/test_codex_fleet_manager.py`.
+- OpenWrt runtime scripts were synced; auto loop is running and reports `seen_sessions=129`, `pending_sessions=0`.
+- Four review-created Feishu groups from the review run were deleted and unbound; no bindings remain for the review session IDs.
+
 ### 069 Restore Safe Feishu Auto Group Creation
 
 Status: completed

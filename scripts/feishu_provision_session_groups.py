@@ -128,27 +128,44 @@ def apply_openclaw_group_defaults(cfg, chat_ids, owner_open_id, dry_run=False):
 
 def load_state(path):
     if not path:
-        return {"seen_session_ids": []}
+        return {"seen_session_ids": [], "pending_session_chats": {}}
     state_path = Path(path)
     if not state_path.exists():
-        return {"seen_session_ids": []}
+        return {"seen_session_ids": [], "pending_session_chats": {}}
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
     except Exception:
-        return {"seen_session_ids": []}
+        return {"seen_session_ids": [], "pending_session_chats": {}}
     seen = data.get("seen_session_ids")
     if not isinstance(seen, list):
         seen = []
-    return {"seen_session_ids": [str(item) for item in seen if item]}
+    pending = data.get("pending_session_chats")
+    if not isinstance(pending, dict):
+        pending = {}
+    return {
+        "seen_session_ids": [str(item) for item in seen if item],
+        "pending_session_chats": {
+            str(sid): str(chat_id)
+            for sid, chat_id in pending.items()
+            if str(sid) and str(chat_id).startswith("oc_")
+        },
+    }
 
 
-def save_state(path, seen_session_ids, dry_run=False):
+def save_state(path, seen_session_ids, dry_run=False, pending_session_chats=None):
+    pending_session_chats = pending_session_chats or {}
     if not path:
-        return {"state_file": "", "seen_sessions": len(seen_session_ids), "dry_run": dry_run}
+        return {
+            "state_file": "",
+            "seen_sessions": len(seen_session_ids),
+            "pending_sessions": len(pending_session_chats),
+            "dry_run": dry_run,
+        }
     state_path = Path(path)
     result = {
         "state_file": str(state_path),
         "seen_sessions": len(seen_session_ids),
+        "pending_sessions": len(pending_session_chats),
         "dry_run": dry_run,
     }
     if dry_run:
@@ -159,6 +176,7 @@ def save_state(path, seen_session_ids, dry_run=False):
             {
                 "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "seen_session_ids": sorted(seen_session_ids),
+                "pending_session_chats": dict(sorted(pending_session_chats.items())),
             },
             ensure_ascii=False,
             indent=2,
@@ -169,7 +187,16 @@ def save_state(path, seen_session_ids, dry_run=False):
     return result
 
 
+def allowed_sources(values):
+    allowed = []
+    for value in values or []:
+        allowed.extend(item.strip() for item in str(value).split(","))
+    return {item for item in allowed if item}
+
+
 def run_once(args):
+    if args.session_id and args.new_sessions_only:
+        raise SystemExit("--session-id cannot be combined with --new-sessions-only")
     manager = args.manager.rstrip("/")
     cfg = load_feishu_config(args.config)
     owner_open_id = args.owner_open_id or owner_open_id_from_config(cfg)
@@ -196,9 +223,17 @@ def run_once(args):
         sid = str(s.get("session_id") or "")
         if sid in project_by_session and not s.get("project_alias"):
             s["project_alias"] = project_by_session[sid]
-    state = load_state(args.state_file) if args.new_sessions_only else {"seen_session_ids": []}
+    sources = allowed_sources(args.source)
+    if sources and not args.session_id:
+        sessions = [s for s in sessions if str(s.get("source") or "") in sources]
+    state = load_state(args.state_file) if args.new_sessions_only else {"seen_session_ids": [], "pending_session_chats": {}}
     seen_session_ids = set(state.get("seen_session_ids") or [])
+    pending_session_chats = dict(state.get("pending_session_chats") or {})
     known_session_ids = {str(s.get("session_id") or "") for s in sessions if str(s.get("session_id") or "")}
+    pending_session_chats = {
+        sid: chat_id for sid, chat_id in pending_session_chats.items()
+        if sid in known_session_ids
+    }
     state_result = {}
 
     if args.session_id:
@@ -224,11 +259,13 @@ def run_once(args):
         if str(b.get("session_id") or "") and str(b.get("chat_id") or "").startswith("oc_")
     }
 
-    token = None if args.dry_run else tenant_token(cfg)
+    token = None
     created = []
     skipped = []
     failed = []
     new_chat_ids = []
+    seen_after_success = set(seen_session_ids)
+    pending_after = dict(pending_session_chats)
 
     for offset, session in enumerate(sessions, args.start):
         sid = str(session.get("session_id") or "")
@@ -236,6 +273,8 @@ def run_once(args):
             continue
         if sid in existing_by_session:
             skipped.append({"number": offset, "session_id": sid, "chat_id": existing_by_session[sid].get("chat_id")})
+            seen_after_success.add(sid)
+            pending_after.pop(sid, None)
             continue
         name = group_name(offset, session)
         desc = f"Codex session {sid}\nsource={session.get('source') or ''}\ncwd={session.get('cwd') or ''}"
@@ -243,6 +282,26 @@ def run_once(args):
             created.append({"number": offset, "session_id": sid, "name": name, "dry_run": True})
             continue
         try:
+            pending_chat_id = pending_after.get(sid)
+            if pending_chat_id:
+                http_json(
+                    manager + "/api/session-chats/bind",
+                    method="POST",
+                    body={
+                        "channel": "feishu",
+                        "chat_id": pending_chat_id,
+                        "profile": args.profile,
+                        "session_selector": sid,
+                        "session_policy": "fixed-session",
+                    },
+                )
+                skipped.append({"number": offset, "session_id": sid, "chat_id": pending_chat_id, "pending_bound": True})
+                new_chat_ids.append(pending_chat_id)
+                seen_after_success.add(sid)
+                pending_after.pop(sid, None)
+                continue
+            if token is None:
+                token = tenant_token(cfg)
             resp = create_group(cfg["base"], token, owner_open_id, name, desc)
             if int(resp.get("code") or 0) != 0:
                 failed.append({"number": offset, "session_id": sid, "name": name, "error": resp.get("msg") or resp})
@@ -258,16 +317,27 @@ def run_once(args):
                 "session_selector": sid,
                 "session_policy": "fixed-session",
             }
-            http_json(manager + "/api/session-chats/bind", method="POST", body=bind)
+            try:
+                http_json(manager + "/api/session-chats/bind", method="POST", body=bind)
+            except Exception as e:
+                if args.new_sessions_only:
+                    pending_after[sid] = chat_id
+                failed.append({"number": offset, "session_id": sid, "chat_id": chat_id, "name": name, "error": f"bind failed: {e!r}"})
+                continue
             if not args.no_intro:
-                send_message(
-                    cfg["base"],
-                    token,
-                    chat_id,
-                    f"已绑定 Codex 会话: {sid[:13]}\n普通消息会发送到这个会话。",
-                )
+                try:
+                    send_message(
+                        cfg["base"],
+                        token,
+                        chat_id,
+                        f"已绑定 Codex 会话: {sid[:13]}\n普通消息会发送到这个会话。",
+                    )
+                except Exception as e:
+                    failed.append({"number": offset, "session_id": sid, "chat_id": chat_id, "name": name, "error": f"intro failed: {e!r}"})
             created.append({"number": offset, "session_id": sid, "chat_id": chat_id, "name": name})
             new_chat_ids.append(chat_id)
+            seen_after_success.add(sid)
+            pending_after.pop(sid, None)
             time.sleep(0.2)
         except urllib.error.HTTPError as e:
             failed.append({"number": offset, "session_id": sid, "name": name, "error": e.read().decode(errors="replace")[:500]})
@@ -277,7 +347,7 @@ def run_once(args):
         fresh_cfg = load_feishu_config(args.config)
         apply_result = apply_openclaw_group_defaults(fresh_cfg, group_chat_ids | set(new_chat_ids), owner_open_id, False)
     if args.new_sessions_only:
-        state_result = save_state(args.state_file, seen_session_ids | known_session_ids, args.dry_run)
+        state_result = save_state(args.state_file, seen_after_success, args.dry_run, pending_after)
 
     return {
         "created": created,
@@ -297,6 +367,7 @@ def main():
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--start", type=int, default=1)
     ap.add_argument("--session-id", default="", help="Provision only the exact manager session id.")
+    ap.add_argument("--source", action="append", default=[], help="Only provision sessions whose source matches this value. May be repeated or comma-separated.")
     ap.add_argument("--new-sessions-only", action="store_true", help="Only provision sessions not already recorded in --state-file.")
     ap.add_argument("--state-file", default="", help="JSON state file used with --new-sessions-only.")
     ap.add_argument("--loop", action="store_true")
