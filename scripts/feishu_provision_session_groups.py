@@ -151,7 +151,12 @@ def run_once(args):
         sid = str(s.get("session_id") or "")
         if sid in project_by_session and not s.get("project_alias"):
             s["project_alias"] = project_by_session[sid]
-    sessions = sessions[max(args.start - 1, 0):max(args.start - 1, 0) + args.limit]
+    if args.session_id:
+        sessions = [s for s in sessions if str(s.get("session_id") or "") == args.session_id]
+        if not sessions:
+            raise SystemExit(f"session not found in manager session list: {args.session_id}")
+    else:
+        sessions = sessions[max(args.start - 1, 0):max(args.start - 1, 0) + args.limit]
     existing_by_session = {
         str(b.get("session_id")): b
         for b in bindings
@@ -222,6 +227,7 @@ def main():
     ap.add_argument("--profile", default="")
     ap.add_argument("--limit", type=int, default=200)
     ap.add_argument("--start", type=int, default=1)
+    ap.add_argument("--session-id", default="", help="Provision only the exact manager session id.")
     ap.add_argument("--loop", action="store_true")
     ap.add_argument("--interval", type=float, default=10)
     ap.add_argument("--no-intro", action="store_true")

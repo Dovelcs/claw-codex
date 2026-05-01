@@ -18,6 +18,33 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 068 Provision Current Feishu Session Group Only
+
+Status: completed
+
+Planned actions:
+
+1. Confirm the current VS Code session exists in the fleet manager and has no Feishu binding.
+2. Add a safe exact-session filter to the Feishu provisioning script.
+3. Sync only that script to OpenWrt and dry-run against the current session.
+4. Create and bind only the current session group, then verify manager and OpenClaw state.
+
+Result:
+
+- Added `--session-id` to `scripts/feishu_provision_session_groups.py` so provisioning can target exactly one manager session instead of relying on list slicing.
+- Dry-run against `019de397-0748-75d1-acb6-4de138b8d2e3` planned exactly one group creation and no skipped or failed sessions.
+- Created one Feishu group for the current session:
+  - session: `019de397-0748-75d1-acb6-4de138b8d2e3`
+  - chat: `oc_d733db1a724f074f48628ca726815933`
+  - name: `codex-server 修复飞书长任务失败消息`
+- Updated OpenClaw group defaults with backup `/data/state/openclaw.json.bak-codex-group-defaults-20260501141259`.
+
+Evidence:
+
+- Fleet manager now returns one Feishu binding for the current session with `session_policy=fixed-session`.
+- OpenClaw config contains `oc_d733db1a724f074f48628ca726815933` in both `groupAllowFrom` and `groups`.
+- The auto bulk helper remains non-executable and no `feishu_auto_session_groups.sh` process is running.
+
 ### 067 Roll Back Accidental Feishu Group Provisioning
 
 Status: completed
