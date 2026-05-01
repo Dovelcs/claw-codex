@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 TARGETS = [
+    Path("/data/state/codex-bridge/package/server/codex_bridge_server.py"),
     Path("/opt/weixin-bot/data/openclaw/state/codex-bridge/package/server/codex_bridge_server.py"),
     Path("/opt/weixin-bot/openclaw/openclaw-codex-bridge/server/codex_bridge_server.py"),
 ]
@@ -18,6 +19,9 @@ MIRROR_BLOCK = r'''def send_feishu_session_mirror(chat_id, message, event=None):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
     event_id=(event or {}).get('event_id') if isinstance(event,dict) else None
     session_id=(event or {}).get('session_id') if isinstance(event,dict) else None
+    etype=str((event or {}).get('type') or '') if isinstance(event,dict) else ''
+    if etype == 'vscode/final':
+        return {'ts':now(),'rc':0,'skipped':True,'reason':'vscode final handled by progress card','event_id':event_id,'session_id':session_id}
     if not target:
         return {'ts':now(),'rc':2,'error':'missing feishu chat target','message':str(message)}
     key=f'fleet-session:{event_id}:{target}' if event_id else f'fleet-session:{session_id}:{target}:{hash_text(message)}'
@@ -29,6 +33,38 @@ MIRROR_BLOCK = r'''def send_feishu_session_mirror(chat_id, message, event=None):
 
 def feishu_session_progress_key(chat_id, session_id):
     return normalize_feishu_chat_id('feishu',chat_id,'')+'|'+str(session_id or '')
+
+def feishu_session_final_key(chat_id, session_id, event=None, message=''):
+    target=normalize_feishu_chat_id('feishu',chat_id,'')
+    event_id=(event or {}).get('event_id') if isinstance(event,dict) else None
+    if not event_id and isinstance(event,dict):
+        try:
+            event_id=fleet_event_id(event)
+        except Exception:
+            event_id=None
+    suffix=str(event_id or '').strip() or hash_text(message)
+    return target+'|'+str(session_id or '')+'|'+suffix
+
+def mark_feishu_session_final(chat_id, session_id, event=None, message=''):
+    target=normalize_feishu_chat_id('feishu',chat_id,'')
+    if not target or not session_id:
+        return True
+    state=load_feishu_session_mirror_state()
+    finals=state.setdefault('final_messages',{})
+    key=feishu_session_final_key(chat_id,session_id,event,message)
+    if key in finals:
+        return False
+    finals[key]={
+        'ts':now(),
+        'target':target,
+        'session_id':session_id,
+        'event_id':str((event or {}).get('event_id') or '').strip() if isinstance(event,dict) else '',
+    }
+    if len(finals) > 500:
+        for old_key in sorted(finals, key=lambda k: str((finals.get(k) or {}).get('ts') or ''))[:len(finals)-500]:
+            finals.pop(old_key,None)
+    save_feishu_session_mirror_state(state)
+    return True
 
 def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
@@ -159,12 +195,8 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                         if etype == 'vscode/assistant':
                             send_feishu_session_progress_mirror(chat_id,sid,text,ev,done=False)
                         elif etype == 'vscode/final':
-                            key=feishu_session_progress_key(chat_id,sid)
-                            progress=(load_feishu_session_mirror_state().get('progress_messages') or {})
-                            if progress.get(key):
+                            if mark_feishu_session_final(chat_id,sid,ev,text):
                                 send_feishu_session_progress_mirror(chat_id,sid,text,ev,done=True)
-                            else:
-                                send_feishu_session_mirror(chat_id,text,ev)
                         elif etype == 'vscode/user':
                             clear_feishu_session_progress_mirror(chat_id,sid,ev)
                             send_feishu_session_mirror(chat_id,text,ev)
