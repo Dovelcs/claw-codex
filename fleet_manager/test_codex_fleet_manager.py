@@ -149,6 +149,37 @@ class FleetStoreTest(unittest.TestCase):
         self.assertEqual(guidance_command["payload"]["prompt"], "补充：先改方向 B")
         self.assertEqual(guidance_command["payload"]["session_id"], "thread-1")
 
+    def test_project_prefix_starts_project_task_instead_of_guidance(self):
+        self.store.register_endpoint("company-main", "Company", {"vscode": True}, [
+            {"id": "server-thread", "source": "vscode", "title": "codex-server", "cwd": "/repo/codex-server"},
+            {"id": "database-thread", "source": "vscode", "title": "codex-database", "cwd": "/repo/codex-database"},
+        ])
+        self.store.register_project("codex-server", "company-main", "/repo/codex-server")
+        self.store.register_project("codex-database", "company-main", "/repo/codex-database")
+        self.store.bind_chat("openclaw-feishu", "chat-1", "session-key-1", "codex-server")
+        active = self.store.create_chat_task("openclaw-feishu", "chat-1", "先处理服务器")
+        first_command = self.store.claim_commands("company-main")[0]
+        self.store.record_worker_events("company-main", {
+            "command_results": [{
+                "command_id": first_command["command_id"],
+                "task_id": active["task_id"],
+                "ok": True,
+                "task_status": "running",
+                "session_id": "server-thread",
+            }]
+        })
+
+        routed = self.store.create_chat_task("openclaw-feishu", "chat-1", "codex-database 检查OpenWrt连通性")
+        command = self.store.claim_commands("company-main")[0]
+
+        self.assertNotEqual(routed["task_id"], active["task_id"])
+        self.assertEqual(routed["project_alias"], "codex-database")
+        self.assertEqual(routed["session_id"], "database-thread")
+        self.assertNotIn("guidance", routed)
+        self.assertEqual(command["payload"]["project"]["alias"], "codex-database")
+        self.assertEqual(command["payload"]["prompt"], "检查OpenWrt连通性")
+        self.assertFalse(command["payload"].get("guidance", False))
+
     def test_chat_message_can_explicitly_start_new_task(self):
         self.store.register_endpoint("company-main", "Company", {"vscode": True}, [
             {"id": "thread-1", "source": "vscode", "title": "codex-server", "cwd": "/repo/codex-server"}

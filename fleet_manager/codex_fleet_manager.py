@@ -492,6 +492,18 @@ class FleetStore:
             binding = self.chat_binding(channel, chat_id)
             if not binding:
                 raise KeyError(f"chat is not bound: {channel}:{chat_id}")
+            explicit_project, explicit_prompt = self.split_project_prompt(prompt)
+            if explicit_project:
+                profile = binding.get("profile") or f"{channel}:{chat_id}"
+                return self._create_task(
+                    profile,
+                    explicit_prompt,
+                    explicit_project,
+                    None,
+                    None,
+                    chat_channel=channel,
+                    chat_id=chat_id,
+                )
             active = self.chat_active_task(channel, chat_id)
             if active and not is_new_chat_task_request(prompt):
                 return self._enqueue_chat_guidance(binding, active, prompt)
@@ -776,6 +788,21 @@ class FleetStore:
         else:
             rows = self.db.execute("select * from chat_bindings order by updated_at desc").fetchall()
         return [dict(row) for row in rows]
+
+    def split_project_prompt(self, prompt: str) -> tuple[str | None, str]:
+        text = str(prompt or "").strip()
+        if not text:
+            return None, str(prompt or "")
+        for project in sorted(self.projects(), key=lambda item: len(str(item.get("alias") or "")), reverse=True):
+            alias = str(project.get("alias") or "").strip()
+            if not alias:
+                continue
+            match = re.match(rf"^{re.escape(alias)}(?:\s+|[:：/]+)(.+)$", text, re.IGNORECASE | re.DOTALL)
+            if match:
+                body = match.group(1).strip()
+                if body:
+                    return alias, body
+        return None, str(prompt or "")
 
     def resolve_session_chat(self, channel: str, owner_chat_id: str, selector: str) -> dict[str, Any] | None:
         selector = (selector or "").strip()
