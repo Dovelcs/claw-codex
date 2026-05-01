@@ -55,6 +55,22 @@ export interface FleetCommandResult {
   error?: string;
 }
 
+export interface FleetTask {
+  task_id: string;
+  endpoint_id?: string | null;
+  project_alias?: string | null;
+  session_id?: string | null;
+  prompt?: string | null;
+  mode?: string | null;
+  status?: string | null;
+  last_summary?: string | null;
+  profile?: string | null;
+  chat_channel?: string | null;
+  chat_id?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export class FleetManagerClient {
   readonly managerUrl: string;
   private readonly timeoutMs: number;
@@ -102,6 +118,11 @@ export class FleetManagerClient {
     const query = channel ? `?channel=${encodeURIComponent(channel)}` : "";
     const payload = await this.get<{ bindings?: FleetChatBinding[] }>(`/api/chat-bindings${query}`);
     return Array.isArray(payload.bindings) ? payload.bindings : [];
+  }
+
+  async tasks(): Promise<FleetTask[]> {
+    const payload = await this.get<{ tasks?: FleetTask[] }>("/api/tasks");
+    return Array.isArray(payload.tasks) ? payload.tasks : [];
   }
 
   async waitForManager(): Promise<void> {

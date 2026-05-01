@@ -636,8 +636,20 @@ class FleetStore:
         )
         if task_id and event_type in {"turn/completed", "task/completed"}:
             self.db.execute("update tasks set status='completed',last_summary=coalesce(?,last_summary),updated_at=? where task_id=?", (message, now(), task_id))
-        if task_id and event_type in {"turn/aborted", "task/error"}:
+        elif task_id and event_type in {"turn/aborted", "task/error"}:
             self.db.execute("update tasks set status='error',last_summary=coalesce(?,last_summary),updated_at=? where task_id=?", (message, now(), task_id))
+        elif task_id and event_type in {"turn/sent", "turn/started", "vscode/user", "vscode/assistant", "vscode/final", "task/final"}:
+            self.db.execute(
+                """
+                update tasks
+                   set status=case when status in ('queued','pending') then 'running' else status end,
+                       session_id=coalesce(?,session_id),
+                       last_summary=case when coalesce(?, '') != '' then ? else last_summary end,
+                       updated_at=?
+                 where task_id=?
+                """,
+                (session_id, message, message, now(), task_id),
+            )
 
     def state(self) -> dict[str, Any]:
         return {

@@ -3,7 +3,7 @@ import readline from "node:readline";
 import { BridgeController } from "../bridge/controller.js";
 import type { AppServerClientOptions } from "../appserver/client.js";
 import type { ThreadSummary } from "../appserver/types.js";
-import { FleetManagerClient, type FleetChatBinding, type FleetCommand, type FleetCommandResult, type FleetEvent, type FleetSession } from "../fleet/manager-client.js";
+import { FleetManagerClient, type FleetChatBinding, type FleetCommand, type FleetCommandResult, type FleetEvent, type FleetSession, type FleetTask } from "../fleet/manager-client.js";
 import { watchRolloutTask, type RolloutTaskEvent } from "../fleet/rollout-monitor.js";
 import { CodexSessionScanner, mergeFleetSessions } from "../fleet/session-scanner.js";
 
@@ -100,6 +100,7 @@ export class WorkerAgent {
       worker: "codex-vscode-bridge"
     }, sessions);
     await this.ensureSessionMirrors(sessions);
+    await this.recoverRunningTaskWatches(sessions);
   }
 
   async sendHeartbeat(): Promise<void> {
@@ -419,6 +420,43 @@ export class WorkerAgent {
         this.sessionMirrorWatches.delete(session.id);
       }
     });
+  }
+
+  private async recoverRunningTaskWatches(sessions: FleetSession[]): Promise<void> {
+    let tasks: FleetTask[];
+    try {
+      tasks = await this.manager.tasks();
+    } catch (error) {
+      this.reportAgentError(error);
+      return;
+    }
+    const sessionById = new Map(sessions.map((session) => [session.id, session]));
+    for (const task of tasks) {
+      if (task.endpoint_id !== this.options.endpointId || task.status !== "running" || task.mode !== "vscode") {
+        continue;
+      }
+      const taskId = stringValue(task.task_id);
+      const sessionId = stringValue(task.session_id);
+      if (!taskId || !sessionId || this.taskBySession.has(sessionId)) {
+        continue;
+      }
+      const session = sessionById.get(sessionId);
+      if (!session || session.source !== "vscode" || !stringValue(session.rolloutPath)) {
+        continue;
+      }
+      const command: FleetCommand = {
+        command_id: `recover-${taskId}`,
+        endpoint_id: this.options.endpointId,
+        task_id: taskId,
+        type: "send",
+        payload: {
+          task_id: taskId,
+          session_id: sessionId
+        }
+      };
+      this.rememberTask(command, sessionId);
+      this.watchVscodeRollout(command, session);
+    }
   }
 
   private async reportMirroredRolloutEvent(rolloutEvent: RolloutTaskEvent): Promise<void> {

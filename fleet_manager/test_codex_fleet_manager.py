@@ -48,6 +48,26 @@ class FleetStoreTest(unittest.TestCase):
         self.assertEqual(updated["status"], "completed")
         self.assertEqual(updated["last_summary"], "done")
 
+    def test_progress_events_refresh_running_task_summary(self):
+        self.store.register_endpoint("company-main", "Company", {})
+        task = self.store.create_task("default", "hello", None, None, None)
+        command = self.store.claim_commands("company-main")[0]
+        self.store.record_worker_events("company-main", {
+            "command_results": [{
+                "command_id": command["command_id"],
+                "task_id": task["task_id"],
+                "ok": True,
+                "task_status": "running",
+                "session_id": "thread-1",
+            }],
+            "events": [{"task_id": task["task_id"], "session_id": "thread-1", "type": "vscode/assistant", "message": "working"}],
+        })
+
+        updated = self.store.task(task["task_id"])
+        self.assertEqual(updated["status"], "running")
+        self.assertEqual(updated["session_id"], "thread-1")
+        self.assertEqual(updated["last_summary"], "working")
+
     def test_clear_context_and_summary(self):
         self.store.register_endpoint("company-main", "Company", {"vscode": True}, [
             {"id": "019dd3d6-a736-7aa3", "source": "vscode", "title": "codex-server", "cwd": "/repo/codex-server"}
