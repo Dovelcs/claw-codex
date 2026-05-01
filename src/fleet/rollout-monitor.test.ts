@@ -43,3 +43,17 @@ test("normalizeRolloutLine extracts user, final, and task completion events", ()
     turnId: "turn-1"
   }]);
 });
+
+test("normalizeRolloutLine reports context compaction as assistant status progress", () => {
+  assert.deepEqual(normalizeRolloutLine(JSON.stringify({
+    timestamp: "2026-05-01T08:04:40.634Z",
+    type: "event_msg",
+    payload: { type: "context_compacted" }
+  }), "thread-1"), [{
+    kind: "codex_status",
+    timestamp: "2026-05-01T08:04:40.634Z",
+    threadId: "thread-1",
+    role: "assistant",
+    text: "上下文已压缩，继续处理..."
+  }]);
+});

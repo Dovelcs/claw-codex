@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 
 export interface RolloutTaskEvent {
-  kind: "user_input" | "codex_reply" | "final_answer" | "task_started" | "task_complete";
+  kind: "user_input" | "codex_reply" | "codex_status" | "final_answer" | "task_started" | "task_complete";
   timestamp?: string | null;
   threadId: string;
   turnId?: string | null;
@@ -125,6 +125,15 @@ export function normalizeRolloutLine(line: string, threadId: string): RolloutTas
     }
     if (payload.type === "task_complete") {
       return [{ kind: "task_complete", timestamp, threadId, turnId: stringValue(payload.turn_id) ?? null }];
+    }
+    if (payload.type === "context_compacted") {
+      return [{
+        kind: "codex_status",
+        timestamp,
+        threadId,
+        role: "assistant",
+        text: "上下文已压缩，继续处理..."
+      }];
     }
     return [];
   }

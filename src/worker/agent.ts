@@ -426,15 +426,16 @@ export class WorkerAgent {
       return;
     }
     const text = rolloutEvent.text?.trim();
-    if (!text || (rolloutEvent.kind !== "user_input" && rolloutEvent.kind !== "codex_reply" && rolloutEvent.kind !== "final_answer")) {
+    if (!text || (rolloutEvent.kind !== "user_input" && rolloutEvent.kind !== "codex_reply" && rolloutEvent.kind !== "codex_status" && rolloutEvent.kind !== "final_answer")) {
       return;
     }
     if (this.isRecentlyReportedTaskRolloutEvent(rolloutEvent, text)) {
       return;
     }
-    const typeByKind: Record<"user_input" | "codex_reply" | "final_answer", string> = {
+    const typeByKind: Record<"user_input" | "codex_reply" | "codex_status" | "final_answer", string> = {
       user_input: "vscode/user",
       codex_reply: "vscode/assistant",
+      codex_status: "vscode/assistant",
       final_answer: "vscode/final"
     };
     await this.manager.postEvents({
@@ -455,6 +456,7 @@ export class WorkerAgent {
     const typeByKind: Record<RolloutTaskEvent["kind"], string> = {
       user_input: "vscode/user",
       codex_reply: "vscode/assistant",
+      codex_status: "vscode/assistant",
       final_answer: "task/final",
       task_started: "turn/started",
       task_complete: "turn/completed"

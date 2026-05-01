@@ -199,19 +199,36 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
         run_meta=read_json(Path(run_dir)/'meta.json',{}) if run_dir else {}
         feishu_chat=feishu_group or is_feishu_channel(run_meta.get('channel')) or is_feishu_channel(run_meta.get('session_key'))
     except Exception:
-        feishu_chat=feishu_group
+        run_meta={}; feishu_chat=feishu_group
+    feishu_target=feishu_target_from_meta(run_meta) if feishu_chat else ''
+    feishu_account=feishu_account_from_meta(run_meta) if feishu_chat else 'default'
+    def adopt_feishu_task_target(task):
+        nonlocal feishu_chat,feishu_target,feishu_account
+        if not isinstance(task,dict):
+            return
+        channel=task.get('chat_channel')
+        chat_id=task.get('chat_id')
+        if is_feishu_channel(channel) and is_feishu_group_chat_id(chat_id):
+            feishu_chat=True
+            _,owner=feishu_owner_chat_id(channel,chat_id,'')
+            feishu_target=owner or normalize_feishu_chat_id(channel,chat_id,'')
+            feishu_account=feishu_account or 'default'
     seen_event_id=0
     progress_pending=[]
     def task_send(message, kind='message', ev=None):
         if feishu_chat:
             key=f'fleet-task:{task_id}:{kind}:{hash_text(message)}'
             data={'task_id':task_id,'kind':kind,'event':ev}
+            if feishu_target:
+                return enqueue_outbound_message(key,message,channel='feishu',account=feishu_account or 'default',target=feishu_target,run_dir=run_dir,event=data)
             return enqueue_feishu_run_message(key,message,run_dir,data)
         return send_human(message,run_dir)
     while time.time()<deadline:
         try:
             events=fleet_task_events(task_id,50)
-            if feishu_group:
+            task=fleet_task_status(task_id) or {}
+            adopt_feishu_task_target(task)
+            if feishu_chat:
                 newest=seen_event_id
                 for ev in reversed(events):
                     eid=fleet_event_id(ev)
@@ -248,7 +265,7 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
                 else:
                     task_send('公司 Codex 完成'+fleet_task_visibility_note(task_id)+'：\n'+final_summary,'final',final_event)
                 return
-            task=fleet_task_status(task_id) or {}; status=str(task.get('status') or '').strip(); last=status or last
+            status=str(task.get('status') or '').strip(); last=status or last
             if status in ('completed','error','cancelled'):
                 summary=' '.join(str(task.get('last_summary') or final_summary or '').split()).strip()
                 if feishu_chat:

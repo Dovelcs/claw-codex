@@ -98,6 +98,17 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
         run_meta={}; feishu_chat=feishu_group
     feishu_target=feishu_target_from_meta(run_meta) if feishu_chat else ''
     feishu_account=feishu_account_from_meta(run_meta) if feishu_chat else 'default'
+    def adopt_feishu_task_target(task):
+        nonlocal feishu_chat,feishu_target,feishu_account
+        if not isinstance(task,dict):
+            return
+        channel=task.get('chat_channel')
+        chat_id=task.get('chat_id')
+        if is_feishu_channel(channel) and is_feishu_group_chat_id(chat_id):
+            feishu_chat=True
+            _,owner=feishu_owner_chat_id(channel,chat_id,'')
+            feishu_target=owner or normalize_feishu_chat_id(channel,chat_id,'')
+            feishu_account=feishu_account or 'default'
     seen_event_id=0
     progress_buffer=[]
     progress_message_id=''
@@ -107,6 +118,8 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
         if feishu_chat:
             key=f'fleet-task:{task_id}:{kind}:{hash_text(message)}'
             data={'task_id':task_id,'kind':kind,'event':ev}
+            if feishu_target:
+                return enqueue_outbound_message(key,message,channel='feishu',account=feishu_account or 'default',target=feishu_target,run_dir=run_dir,event=data)
             return enqueue_feishu_run_message(key,message,run_dir,data)
         return send_human(message,run_dir)
     def compact_progress_text():
@@ -118,7 +131,7 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
         nonlocal progress_message_id,last_progress_edit,last_progress_text
         if not feishu_chat or not feishu_target:
             return None
-        text=str(final_text or '').strip() if done or error else compact_progress_text()
+        text=str(final_text or '').strip() or compact_progress_text()
         if not text:
             return None
         now_ts=time.time()
@@ -156,6 +169,8 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
     while time.time()<deadline:
         try:
             events=fleet_task_events(task_id,50)
+            task=fleet_task_status(task_id) or {}
+            adopt_feishu_task_target(task)
             if feishu_chat:
                 newest=seen_event_id
                 for ev in reversed(events):
@@ -198,7 +213,7 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
                 else:
                     task_send(('任务失败：' if feishu_chat else '公司 Codex 任务失败：')+(final_summary or str(task_id)),'error',final_event)
                 return
-            task=fleet_task_status(task_id) or {}; status=str(task.get('status') or '').strip(); last=status or last
+            status=str(task.get('status') or '').strip(); last=status or last
             if status in ('completed','error','cancelled'):
                 summary=' '.join(str(task.get('last_summary') or final_summary or '').split()).strip()
                 if feishu_chat:
@@ -225,7 +240,7 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
             append(STATE/'server.log',f'{now()} fleet completion watcher failed task={task_id}: {e}')
         time.sleep(interval)
     if feishu_chat and progress_message_id:
-        progress_card_update(force=True,error=True,final_text=f'任务仍未完成：{task_id}，最后状态 {last or "unknown"}。可说“现在状态”查看。')
+        progress_card_update(force=True,final_text=f'任务仍在处理：{task_id}，最后状态 {last or "unknown"}。可说“现在状态”查看。')
     else:
         task_send(f'公司 Codex 任务仍未完成：{task_id}，最后状态 {last or "unknown"}。可说“现在状态”查看。','timeout')
 

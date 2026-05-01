@@ -18,6 +18,59 @@ Debug scripts must be fixed direct scripts by default: no command-line parameter
 
 ## Events
 
+### 066 Fix Feishu Final Double Send
+
+Status: completed
+
+Planned actions:
+
+1. Trace why some Feishu task completions still send both `公司 Codex 完成：<final>` and bare `<final>`.
+2. Verify whether the duplicate comes from rollout normalization, task completion watcher, or session mirror polling.
+3. Patch the active bridge path so Feishu task metadata forces the Feishu final branch and final-notification marker.
+4. Sync the reusable OpenWrt patch scripts and verify local/remote syntax plus bridge health.
+
+Result:
+
+- Root cause: one task could be reported by two send paths:
+  - `watch_fleet_task_completion()` sometimes failed to infer Feishu group context from `run_dir` and sent the generic non-Feishu prefix `公司 Codex 完成：...`;
+  - the global Feishu session mirror later saw the same `task/final` or `task/completed` event from manager task metadata and sent the bare final text.
+- The generic branch did not call `mark_task_final_notification()`, so the global mirror was not suppressed.
+- Patched the watcher to read `fleet_task_status(task_id)` before final handling, adopt `chat_channel=feishu` and `chat_id=oc_...` as the Feishu target, send through the Feishu outbound queue using that target, and mark the task final before mirror polling can resend it.
+- Synced the fix into the OpenWrt running bridge package and restarted the bridge.
+
+Evidence:
+
+- OpenWrt active bridge `python3 -m py_compile /data/state/codex-bridge/package/server/codex_bridge_server.py` passed.
+- OpenWrt bridge `/health` returned `ok=true` after restart.
+- Local verification passed:
+  - `python3 -m py_compile debug/codex_rollout_spider.py scripts/patch_openwrt_feishu_progress_edit.py scripts/patch_openwrt_outbound_queue.py`
+  - `npm test` passed: 31 tests.
+
+### 065 Forward Context Compaction As Feishu Progress
+
+Status: completed
+
+Planned actions:
+
+1. Confirm the rollout event emitted when Codex compacts context.
+2. Normalize that event into worker progress without using it as final-answer fallback text.
+3. Keep the debug rollout spider aligned with the worker normalizer.
+4. Rebuild, test, and restart the company worker only.
+
+Result:
+
+- Confirmed VS Code rollout JSONL emits `event_msg.context_compacted` during context compression.
+- Updated `src/fleet/rollout-monitor.ts` to emit `codex_status` text `上下文已压缩，继续处理...`.
+- Updated `src/worker/agent.ts` so `codex_status` is reported as `vscode/assistant`, which the deployed Feishu bridge already treats as progress-card content.
+- Kept `codex_status` out of `result.finalText`, so compaction status cannot replace the real final answer.
+- Updated `debug/codex_rollout_spider.py` to show the same event as `STATUS`.
+- Added a focused rollout normalizer test for `context_compacted`.
+- Verification passed:
+  - `npm run build`
+  - `npm test`
+  - `python3 -m py_compile debug/codex_rollout_spider.py`
+- Restarted the company worker through the watchdog; current `company-main` endpoint is online.
+
 ### 064 Land Feishu Group-Only Routing And Unified Bridge Deploy
 
 Status: completed

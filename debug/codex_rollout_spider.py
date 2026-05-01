@@ -167,6 +167,8 @@ def normalize_record(record: dict[str, Any], thread_id: str, include_system: boo
                 "threadId": thread_id,
                 "turnId": payload.get("turn_id"),
             })]
+        if payload_type == "context_compacted":
+            return [message_record(timestamp, thread_id, "assistant", "上下文已压缩，继续处理...", "event_msg", "status")]
         return []
 
     if record_type == "response_item" and payload.get("type") == "message":
@@ -195,6 +197,8 @@ def message_record(timestamp: str | None, thread_id: str, role: Any, text: Any, 
 def message_kind(role: Any, phase: Any) -> str:
     if role == "user":
         return "user_input"
+    if role == "assistant" and phase == "status":
+        return "codex_status"
     if role == "assistant" and phase == "final_answer":
         return "final_answer"
     if role == "assistant":
@@ -260,7 +264,7 @@ class DedupeCache:
     @staticmethod
     def key(record: dict[str, Any]) -> tuple[Any, ...]:
         kind = record.get("kind")
-        if kind in {"user_input", "codex_reply", "final_answer"}:
+        if kind in {"user_input", "codex_reply", "codex_status", "final_answer"}:
             return (
                 kind,
                 timestamp_bucket(record.get("timestamp")),
@@ -299,6 +303,8 @@ def human_line(record: dict[str, Any]) -> str:
         return human_block(timestamp, "USER", clean_user_text(record.get("text")))
     if kind == "codex_reply":
         return human_block(timestamp, "CODEX", clean_text(record.get("text")))
+    if kind == "codex_status":
+        return human_block(timestamp, "STATUS", clean_text(record.get("text")))
     if kind == "final_answer":
         return human_block(timestamp, "FINAL", clean_text(record.get("text")))
     if kind == "decode_error":
