@@ -66,6 +66,49 @@ def mark_feishu_session_final(chat_id, session_id, event=None, message=''):
     save_feishu_session_mirror_state(state)
     return True
 
+def remember_feishu_task_final_session(chat_id, session_id, message, event=None):
+    target=normalize_feishu_chat_id('feishu',chat_id,'')
+    if not session_id:
+        return
+    state=load_feishu_session_mirror_state()
+    recent=state.setdefault('recent_task_finals',{})
+    rec={
+        'ts_epoch':time.time(),
+        'ts':now(),
+        'target':target,
+        'session_id':session_id,
+        'message_hash':hash_text(message),
+        'event_id':(event or {}).get('event_id') if isinstance(event,dict) else None,
+    }
+    if target:
+        recent[feishu_session_progress_key(chat_id,session_id)]=rec
+    recent['session|'+str(session_id)]=rec
+    cutoff=time.time()-max(10,float(os.environ.get('CODEX_FEISHU_TASK_FINAL_ECHO_TTL','45')))
+    for old_key,old in list(recent.items()):
+        try:
+            old_ts=float((old or {}).get('ts_epoch') or 0)
+        except Exception:
+            old_ts=0
+        if old_ts and old_ts < cutoff:
+            recent.pop(old_key,None)
+    save_feishu_session_mirror_state(state)
+
+def is_recent_feishu_task_final_echo(chat_id, session_id, message):
+    target=normalize_feishu_chat_id('feishu',chat_id,'')
+    if not session_id:
+        return False
+    state=load_feishu_session_mirror_state()
+    recent=state.get('recent_task_finals') or {}
+    rec=(recent.get(feishu_session_progress_key(chat_id,session_id)) if target else None) or recent.get('session|'+str(session_id)) or {}
+    try:
+        age=time.time()-float(rec.get('ts_epoch') or 0)
+    except Exception:
+        return False
+    ttl=max(10,float(os.environ.get('CODEX_FEISHU_TASK_FINAL_ECHO_TTL','45')))
+    if age < 0 or age > ttl:
+        return False
+    return str(rec.get('message_hash') or '') == hash_text(message)
+
 def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
     if not target:
@@ -75,6 +118,12 @@ def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
     key=feishu_session_progress_key(chat_id,session_id)
     old=progress.pop(key,None)
     if old:
+        update_rec=None
+        try:
+            card=build_feishu_progress_card(session_id,'上一轮会话进度已结束。',done=True,error=False)
+            update_rec=update_feishu_message_api(str(old),card,'default')
+        except Exception as e:
+            update_rec={'ts':now(),'rc':1,'error':repr(e),'target':str(old)}
         save_feishu_session_mirror_state(state)
         append(STATE/'feishu-session-progress-mirror.log',json.dumps({
             'ts':now(),
@@ -83,6 +132,7 @@ def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
             'session_id':session_id,
             'event_id':(event or {}).get('event_id') if isinstance(event,dict) else None,
             'progress_message_id':old,
+            'finalize_old':update_rec,
         },ensure_ascii=False))
     return old or ''
 
@@ -150,13 +200,41 @@ def feishu_task_progress_message(task_id):
 
 def update_feishu_task_progress_final(task_id, chat_id, message, event=None, done=True, error=False):
     message_id,account=feishu_task_progress_message(task_id)
+    safe_message=feishu_progress_safe_final_text(message,done=done,error=error) if 'feishu_progress_safe_final_text' in globals() else ('任务失败。' if error else '已完成。')
     if not message_id:
-        return None
+        target=normalize_feishu_chat_id('feishu',chat_id,'')
+        if not target:
+            return None
+        try:
+            rec=send_feishu_card_api(build_feishu_progress_card(task_id,safe_message,done=done,error=error),target,'default')
+        except Exception as e:
+            rec={'ts':now(),'rc':1,'error':repr(e),'task_id':task_id,'chat_id':chat_id,'missing_progress_message':True}
+        rec['task_id']=task_id
+        rec['chat_id']=chat_id
+        rec['event_id']=(event or {}).get('event_id') if isinstance(event,dict) else None
+        rec['progress_message_id']=feishu_progress_message_id(rec)
+        rec['done']=done
+        rec['error_done']=error
+        rec['fallback_new_done_card']=True
+        append(STATE/'feishu-task-progress-fallback.log',json.dumps(rec,ensure_ascii=False))
+        return rec
     card=build_feishu_progress_card(task_id,message,done=done,error=error)
     try:
         rec=update_feishu_message_api(message_id,card,account)
+        if int((rec or {}).get('rc',1)) != 0:
+            rec=update_feishu_message_api(message_id,build_feishu_progress_card(task_id,safe_message,done=done,error=error),account)
     except Exception as e:
-        rec={'ts':now(),'rc':1,'error':repr(e),'task_id':task_id,'message_id':message_id}
+        try:
+            rec=update_feishu_message_api(message_id,build_feishu_progress_card(task_id,safe_message,done=done,error=error),account)
+        except Exception as e2:
+            target=normalize_feishu_chat_id('feishu',chat_id,'')
+            try:
+                rec=send_feishu_card_api(build_feishu_progress_card(task_id,safe_message,done=done,error=error),target,'default') if target else {'ts':now(),'rc':2,'error':'missing target for fallback done card'}
+                rec['fallback_send_after_update_error']=True
+                rec['first_error']=repr(e)
+                rec['second_error']=repr(e2)
+            except Exception as e3:
+                rec={'ts':now(),'rc':1,'error':repr(e3),'first_error':repr(e),'second_error':repr(e2),'task_id':task_id,'message_id':message_id}
     rec['task_id']=task_id
     rec['chat_id']=chat_id
     rec['event_id']=(event or {}).get('event_id') if isinstance(event,dict) else None
@@ -214,6 +292,7 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                     if task_id:
                         etype=str(ev.get('type') or '')
                         if etype not in ('task/final','task/completed'):
+                            append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_scoped_session_mirror','task_id':task_id,'event_id':eid,'type':etype},ensure_ascii=False))
                             continue
                         task=fleet_task_status(task_id) or {}
                         chat_id=str(task.get('chat_id') or '').strip()
@@ -226,8 +305,8 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                             continue
                         target=normalize_feishu_chat_id('feishu',chat_id,'')
                         if target and mark_task_final_notification(task_id,target,eid):
-                            if not update_feishu_task_progress_final(task_id,chat_id,text,ev,done=True):
-                                send_feishu_session_mirror(chat_id,text,ev)
+                            update_feishu_task_progress_final(task_id,chat_id,text,ev,done=True)
+                            remember_feishu_task_final_session(chat_id,str(ev.get('session_id') or ''),text,ev)
                         continue
                     sid=str(ev.get('session_id') or '').strip()
                     if sid not in session_to_chats:
@@ -238,6 +317,9 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                     etype=str(ev.get('type') or '')
                     for chat_id in session_to_chats.get(sid) or []:
                         if not is_feishu_group_chat_id(chat_id):
+                            continue
+                        if etype in ('vscode/assistant','vscode/final') and is_recent_feishu_task_final_echo(chat_id,sid,text):
+                            append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_final_echo','session_id':sid,'event_id':eid,'type':etype},ensure_ascii=False))
                             continue
                         if etype == 'vscode/assistant':
                             send_feishu_session_progress_mirror(chat_id,sid,text,ev,done=False)

@@ -80,6 +80,14 @@ def feishu_progress_message_id(rec):
         return str(cur.get('messageId') or cur.get('message_id') or '').strip()
     return ''
 
+def feishu_progress_safe_final_text(text, done=False, error=False):
+    fallback='任务失败。' if error else '已完成。' if done else '正在处理...'
+    clean=' '.join(str(text or '').split()).strip() or fallback
+    limit=max(120,min(900,int(os.environ.get('CODEX_FEISHU_PROGRESS_SAFE_FINAL_LIMIT','700'))))
+    if len(clean) > limit:
+        clean=clean[:limit].rstrip()+'...'
+    return clean
+
 '''
 
 
@@ -143,20 +151,40 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
             if text == last_progress_text:
                 return None
         card=build_feishu_progress_card(task_id,text,done=done,error=error)
-        try:
+        def send_or_update(card_obj):
+            nonlocal progress_message_id
             if progress_message_id:
-                rec=update_feishu_message_api(progress_message_id,card,feishu_account)
-            else:
-                rec=send_feishu_card_api(card,feishu_target,feishu_account)
-                mid=feishu_progress_message_id(rec)
-                if mid:
-                    progress_message_id=mid
+                return update_feishu_message_api(progress_message_id,card_obj,feishu_account)
+            rec_obj=send_feishu_card_api(card_obj,feishu_target,feishu_account)
+            mid=feishu_progress_message_id(rec_obj)
+            if mid:
+                progress_message_id=mid
+            return rec_obj
+        try:
+            rec=send_or_update(card)
+            if (done or error) and int((rec or {}).get('rc',1)) != 0:
+                safe_text=feishu_progress_safe_final_text(text,done=done,error=error)
+                rec=send_or_update(build_feishu_progress_card(task_id,safe_text,done=done,error=error))
+                text=safe_text
             last_progress_edit=now_ts
             last_progress_text=text
             if run_dir:
                 append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'done':done,'error':error,'rc':rec.get('rc'),'text':text,'send':rec},ensure_ascii=False))
             return rec
         except Exception as e:
+            if done or error:
+                safe_text=feishu_progress_safe_final_text(text,done=done,error=error)
+                try:
+                    rec=send_or_update(build_feishu_progress_card(task_id,safe_text,done=done,error=error))
+                    last_progress_edit=now_ts
+                    last_progress_text=safe_text
+                    if run_dir:
+                        append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'done':done,'error':error,'rc':rec.get('rc'),'text':safe_text,'send':rec,'fallback_after_error':repr(e)},ensure_ascii=False))
+                    return rec
+                except Exception as e2:
+                    if run_dir:
+                        append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'error':repr(e2),'first_error':repr(e),'text':safe_text,'done':done},ensure_ascii=False))
+                    return None
             if run_dir:
                 append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'error':repr(e),'text':text},ensure_ascii=False))
             return None
@@ -201,7 +229,8 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
             if final_status == 'completed' and final_summary:
                 if feishu_chat:
                     if progress_message_id:
-                        progress_card_update(force=True,done=True,final_text=final_summary)
+                        if not progress_card_update(force=True,done=True,final_text=final_summary):
+                            progress_card_update(force=True,done=True,final_text=feishu_progress_safe_final_text(final_summary,done=True))
                     else:
                         task_send(final_summary,'final',final_event)
                 else:
@@ -209,7 +238,8 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
                 return
             if final_status == 'error':
                 if feishu_chat and progress_message_id:
-                    progress_card_update(force=True,error=True,final_text=final_summary or '任务失败')
+                    if not progress_card_update(force=True,error=True,final_text=final_summary or '任务失败'):
+                        progress_card_update(force=True,error=True,final_text=feishu_progress_safe_final_text(final_summary,done=False,error=True))
                 else:
                     task_send(('任务失败：' if feishu_chat else '公司 Codex 任务失败：')+(final_summary or str(task_id)),'error',final_event)
                 return
@@ -219,7 +249,8 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
                 if feishu_chat:
                     if status=='completed':
                         if progress_message_id:
-                            progress_card_update(force=True,done=True,final_text=summary or '已完成。')
+                            if not progress_card_update(force=True,done=True,final_text=summary or '已完成。'):
+                                progress_card_update(force=True,done=True,final_text=feishu_progress_safe_final_text(summary,done=True))
                         else:
                             task_send(summary or '已完成。','completed',final_event)
                     elif status=='cancelled':
