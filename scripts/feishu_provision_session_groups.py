@@ -118,6 +118,8 @@ def apply_openclaw_group_defaults(cfg, chat_ids, owner_open_id, dry_run=False):
     feishu["groupPolicy"] = "allowlist"
     feishu["groupAllowFrom"] = sorted(allow)
     feishu["requireMention"] = True
+    feishu["topicSessionMode"] = "disabled"
+    feishu["replyInThread"] = "disabled"
     if dry_run:
         return {"updated_groups": len(chat_ids), "dry_run": True}
     backup = path.with_name(path.name + ".bak-codex-group-defaults-" + time.strftime("%Y%m%d%H%M%S"))
