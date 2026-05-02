@@ -36,6 +36,7 @@ PATCH_ORDER = [
     "patch_openwrt_feishu_session_progress.py",
     "patch_openwrt_feishu_group_only_routes.py",
     "patch_openwrt_channel_policy.py",
+    "patch_openwrt_direct_fleet_precontext.py",
 ]
 REQUIRED_MARKERS = [
     "def enqueue_outbound_message(",
