@@ -37,6 +37,7 @@ PATCH_ORDER = [
     "patch_openwrt_feishu_group_only_routes.py",
     "patch_openwrt_channel_policy.py",
     "patch_openwrt_direct_fleet_precontext.py",
+    "patch_openwrt_feishu_fleet_passthrough.py",
 ]
 REQUIRED_MARKERS = [
     "def enqueue_outbound_message(",
@@ -149,6 +150,11 @@ def start_auto_session_groups() -> None:
         "fi'",
         shell=True,
     )
+
+
+def restart_openclaw_container() -> None:
+    subprocess.check_call("docker restart openclaw-gateway-v2 >/dev/null", shell=True)
+    time.sleep(5)
 
 
 def restart_bridge() -> None:
@@ -273,6 +279,7 @@ def main() -> None:
     verify_runtime_markers(runtime_target)
     clear_non_group_progress_bindings()
     restart_bridge()
+    restart_openclaw_container()
     start_auto_session_groups()
     health = bridge_health()
     if not health.get("ok"):
