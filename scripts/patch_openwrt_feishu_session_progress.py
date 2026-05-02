@@ -34,6 +34,9 @@ MIRROR_BLOCK = r'''def send_feishu_session_mirror(chat_id, message, event=None):
 def feishu_session_progress_key(chat_id, session_id):
     return normalize_feishu_chat_id('feishu',chat_id,'')+'|'+str(session_id or '')
 
+def feishu_session_message_fingerprint(message):
+    return hash_text(' '.join(str(message or '').split()).strip())
+
 def feishu_session_final_key(chat_id, session_id, event=None, message=''):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
     event_id=(event or {}).get('event_id') if isinstance(event,dict) else None
@@ -42,7 +45,7 @@ def feishu_session_final_key(chat_id, session_id, event=None, message=''):
             event_id=fleet_event_id(event)
         except Exception:
             event_id=None
-    suffix=str(event_id or '').strip() or hash_text(message)
+    suffix=str(event_id or '').strip() or feishu_session_message_fingerprint(message)
     return target+'|'+str(session_id or '')+'|'+suffix
 
 def mark_feishu_session_final(chat_id, session_id, event=None, message=''):
@@ -77,7 +80,7 @@ def remember_feishu_task_final_session(chat_id, session_id, message, event=None)
         'ts':now(),
         'target':target,
         'session_id':session_id,
-        'message_hash':hash_text(message),
+        'message_hash':feishu_session_message_fingerprint(message),
         'event_id':(event or {}).get('event_id') if isinstance(event,dict) else None,
     }
     if target:
@@ -107,7 +110,7 @@ def is_recent_feishu_task_final_echo(chat_id, session_id, message):
     ttl=max(10,float(os.environ.get('CODEX_FEISHU_TASK_FINAL_ECHO_TTL','45')))
     if age < 0 or age > ttl:
         return False
-    return str(rec.get('message_hash') or '') == hash_text(message)
+    return str(rec.get('message_hash') or '') == feishu_session_message_fingerprint(message)
 
 def clear_feishu_session_progress_mirror(chat_id, session_id, event=None):
     target=normalize_feishu_chat_id('feishu',chat_id,'')
@@ -261,6 +264,26 @@ def is_feishu_group_chat_id(chat_id):
 '''
 
 
+BINDINGS_BLOCK = r'''def feishu_session_mirror_bindings():
+    payload=fleet_api('/api/chat-bindings')
+    bindings=payload.get('bindings') if isinstance(payload,dict) else []
+    session_to_chats={}
+    task_only_chats={}
+    for binding in bindings if isinstance(bindings,list) else []:
+        if not is_feishu_channel(binding.get('channel')):
+            continue
+        sid=str(binding.get('session_id') or '').strip()
+        chat_id=str(binding.get('chat_id') or '').strip()
+        if not sid or not chat_id:
+            continue
+        session_to_chats.setdefault(sid,[]).append(chat_id)
+        if str(binding.get('project_alias') or '').strip() and str(binding.get('session_policy') or '').strip() == 'fixed-session':
+            task_only_chats[feishu_session_progress_key(chat_id,sid)]=True
+    return {'session_to_chats':session_to_chats,'task_only_chats':task_only_chats}
+
+'''
+
+
 WATCH_BLOCK = r'''def watch_feishu_session_events():
     interval=max(0.2,float(os.environ.get('CODEX_FLEET_SESSION_MIRROR_INTERVAL','0.5')))
     tail=max(20,min(300,int(os.environ.get('CODEX_FLEET_SESSION_MIRROR_TAIL','100'))))
@@ -271,12 +294,19 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
     except Exception:
         seen=0
     session_to_chats={}
+    task_only_chats={}
     bindings_expires_at=0.0
     while True:
         try:
             now_ts=time.time()
             if now_ts >= bindings_expires_at:
-                session_to_chats=feishu_session_mirror_bindings()
+                binding_info=feishu_session_mirror_bindings()
+                if isinstance(binding_info,dict) and 'session_to_chats' in binding_info:
+                    session_to_chats=binding_info.get('session_to_chats') or {}
+                    task_only_chats=binding_info.get('task_only_chats') or {}
+                else:
+                    session_to_chats=binding_info or {}
+                    task_only_chats={}
                 bindings_expires_at=now_ts+binding_ttl
             if session_to_chats:
                 payload=fleet_api('/api/events?tail='+str(tail))
@@ -317,6 +347,9 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                     etype=str(ev.get('type') or '')
                     for chat_id in session_to_chats.get(sid) or []:
                         if not is_feishu_group_chat_id(chat_id):
+                            continue
+                        if task_only_chats.get(feishu_session_progress_key(chat_id,sid)):
+                            append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_only_session_mirror','session_id':sid,'event_id':eid,'type':etype,'chat_id':chat_id},ensure_ascii=False))
                             continue
                         if etype in ('vscode/assistant','vscode/final') and is_recent_feishu_task_final_echo(chat_id,sid,text):
                             append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_final_echo','session_id':sid,'event_id':eid,'type':etype},ensure_ascii=False))
@@ -361,6 +394,7 @@ def patch_file(path: Path) -> None:
     shutil.copy2(path, backup)
 
     text = replace_between(text, "def send_feishu_session_mirror(chat_id, message, event=None):\n", "def feishu_session_mirror_bindings", MIRROR_BLOCK)
+    text = replace_between(text, "def feishu_session_mirror_bindings():\n", "def watch_feishu_session_events():\n", BINDINGS_BLOCK)
     text = replace_between(text, "def watch_feishu_session_events():\n", "def start_feishu_session_mirror_watcher", WATCH_BLOCK)
 
     if text == original:
