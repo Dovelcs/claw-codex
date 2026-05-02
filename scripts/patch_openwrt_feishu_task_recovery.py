@@ -33,6 +33,16 @@ def mark_task_final_notification(task_id, target, event_id=''):
         write_json(TASK_FINAL_NOTIFY_STATE,state)
         return True
 
+def is_task_final_notification_sent(task_id, target):
+    if not task_id or not target:
+        return False
+    try:
+        state=read_json(TASK_FINAL_NOTIFY_STATE,{'version':1,'sent':{}})
+        sent=state.get('sent') or {}
+        return task_final_notify_key(task_id,target) in sent
+    except Exception:
+        return False
+
 '''
 
 
@@ -63,6 +73,8 @@ def patch_file(path: Path) -> None:
 
     if "def task_final_notify_key(" not in text:
         text = replace_once(text, "def watch_fleet_task_completion(task_id, item, run_dir=None):\n", TASK_FINAL_GUARD + "def watch_fleet_task_completion(task_id, item, run_dir=None):\n")
+    elif "def is_task_final_notification_sent(" not in text:
+        text = replace_once(text, "\ndef watch_fleet_task_completion(task_id, item, run_dir=None):\n", "\ndef is_task_final_notification_sent(task_id, target):\n    if not task_id or not target:\n        return False\n    try:\n        state=read_json(TASK_FINAL_NOTIFY_STATE,{'version':1,'sent':{}})\n        sent=state.get('sent') or {}\n        return task_final_notify_key(task_id,target) in sent\n    except Exception:\n        return False\n\ndef watch_fleet_task_completion(task_id, item, run_dir=None):\n")
 
     text = text.replace(
         "    last_progress_text=''\n    def task_send(message, kind='message', ev=None):",

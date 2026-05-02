@@ -142,6 +142,24 @@ WATCH_FUNCTION = r'''def watch_fleet_task_completion(task_id, item, run_dir=None
         text=str(final_text or '').strip() or compact_progress_text()
         if not text:
             return None
+        if not done and not error:
+            try:
+                final_sent=globals().get('is_task_final_notification_sent')
+                if callable(final_sent) and final_sent(task_id,feishu_target):
+                    if run_dir:
+                        append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'action':'skip_progress_after_final_notify','text':text},ensure_ascii=False))
+                    return None
+            except Exception:
+                pass
+            try:
+                cur_task=fleet_task_status(task_id) or {}
+                cur_status=str(cur_task.get('status') or '').strip()
+                if cur_status in ('completed','error','cancelled'):
+                    if run_dir:
+                        append(Path(run_dir)/'feishu-progress-card.log',json.dumps({'ts':now(),'task_id':task_id,'message_id':progress_message_id,'action':'skip_progress_after_terminal_status','status':cur_status,'text':text},ensure_ascii=False))
+                    return None
+            except Exception:
+                pass
         now_ts=time.time()
         if not force and not done and not error:
             if len(text) < progress_min_chars and not progress_message_id:
