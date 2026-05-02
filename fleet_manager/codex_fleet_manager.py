@@ -492,18 +492,6 @@ class FleetStore:
             binding = self.chat_binding(channel, chat_id)
             if not binding:
                 raise KeyError(f"chat is not bound: {channel}:{chat_id}")
-            explicit_project, explicit_prompt = self.split_project_prompt(prompt)
-            if explicit_project:
-                profile = binding.get("profile") or f"{channel}:{chat_id}"
-                return self._create_task(
-                    profile,
-                    explicit_prompt,
-                    explicit_project,
-                    None,
-                    None,
-                    chat_channel=channel,
-                    chat_id=chat_id,
-                )
             active = self.chat_active_task(channel, chat_id)
             if active and not is_new_chat_task_request(prompt):
                 return self._enqueue_chat_guidance(binding, active, prompt)

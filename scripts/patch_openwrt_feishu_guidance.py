@@ -15,13 +15,14 @@ TARGETS = [
 
 
 ROUTE_BLOCK = r'''def route_to_bound_chat(text, session_key='', run_dir=None, channel='', chat_id='', retry=False):
-    if not should_route_to_active_fleet(text): return ''
     if is_feishu_channel(channel) and not is_feishu_group_target(channel,chat_id,session_key):
         return ''
     channel,chat_id=chat_identity(channel,chat_id,session_key)
     status=fleet_chat_status(channel,chat_id)
     binding=status.get('binding') if isinstance(status,dict) else None
     if not binding:
+        return ''
+    if not str(text or '').strip():
         return ''
     task=fleet_api('/api/chat-bindings/task',method='POST',body={'channel':channel,'chat_id':chat_id,'prompt':str(text)})
     task_id=(task or {}).get('task_id') if isinstance(task,dict) else ''

@@ -21,6 +21,10 @@ def try_direct_fleet_answer(text, session_key='', run_dir=None, channel='', chat
     if not is_company_fleet_channel(channel):
         return ''
     text=clean_chat_text(text,channel)
+    if is_feishu_group_target(channel,chat_id,session_key):
+        routed=route_to_bound_chat(text,session_key,run_dir,channel,chat_id)
+        if routed:
+            return routed
     if is_session_entry_sync_request(text):
         return publish_feishu_session_entries(text,session_key,run_dir,channel,chat_id)
     if is_session_entry_list_request(text):
