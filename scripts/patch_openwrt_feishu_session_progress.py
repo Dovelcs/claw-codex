@@ -348,9 +348,6 @@ WATCH_BLOCK = r'''def watch_feishu_session_events():
                     for chat_id in session_to_chats.get(sid) or []:
                         if not is_feishu_group_chat_id(chat_id):
                             continue
-                        if task_only_chats.get(feishu_session_progress_key(chat_id,sid)):
-                            append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_only_session_mirror','session_id':sid,'event_id':eid,'type':etype,'chat_id':chat_id},ensure_ascii=False))
-                            continue
                         if etype in ('vscode/assistant','vscode/final') and is_recent_feishu_task_final_echo(chat_id,sid,text):
                             append(STATE/'feishu-session-mirror.log',json.dumps({'ts':now(),'action':'skip_task_final_echo','session_id':sid,'event_id':eid,'type':etype},ensure_ascii=False))
                             continue
