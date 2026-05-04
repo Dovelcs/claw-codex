@@ -8,6 +8,7 @@ FLEET_DB="${CODEX_FLEET_DB:-/opt/weixin-bot/data/codex-fleet/fleet.db}"
 FLEET_HOST="${CODEX_FLEET_HOST:-100.106.225.53}"
 FLEET_PORT="${CODEX_FLEET_PORT:-18992}"
 FLEET_LOG="${CODEX_FLEET_LOG:-/opt/weixin-bot/data/codex-fleet/fleet-manager.log}"
+FLEET_HOST_WAIT_SECONDS="${CODEX_FLEET_HOST_WAIT_SECONDS:-120}"
 
 ts() {
   date -Is
@@ -29,8 +30,46 @@ start_container() {
   docker start "$CONTAINER" >/dev/null 2>&1 || true
 }
 
+fleet_manager_running() {
+  for p in /proc/[0-9]*; do
+    [ -r "$p/cmdline" ] || continue
+    cmd=$(tr "\000" " " < "$p/cmdline" 2>/dev/null || true)
+    case "$cmd" in
+      *"python3 fleet_manager/codex_fleet_manager.py"*|*"python3 /opt/weixin-bot/codex-fleet/fleet_manager/codex_fleet_manager.py"*)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+fleet_host_needs_local_addr() {
+  case "$FLEET_HOST" in
+    ""|"0.0.0.0"|"127.0.0.1"|"localhost")
+      return 1
+      ;;
+  esac
+  return 0
+}
+
+wait_fleet_host_addr() {
+  fleet_host_needs_local_addr || return 0
+  waited=0
+  while ! ip -4 addr show 2>/dev/null | grep -q "inet ${FLEET_HOST}/"; do
+    if [ "$waited" -ge "$FLEET_HOST_WAIT_SECONDS" ]; then
+      log "fleet host address not available after ${waited}s: $FLEET_HOST"
+      return 1
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  if [ "$waited" -gt 0 ]; then
+    log "fleet host address ready after ${waited}s: $FLEET_HOST"
+  fi
+}
+
 start_fleet_manager() {
-  if pgrep -f 'codex_fleet_manager.py' >/dev/null 2>&1; then
+  if fleet_manager_running; then
     log "fleet manager already running"
     return 0
   fi
@@ -38,6 +77,7 @@ start_fleet_manager() {
     log "fleet dir missing: $FLEET_DIR"
     return 0
   fi
+  wait_fleet_host_addr || return 0
   mkdir -p "$(dirname "$FLEET_DB")"
   (
     cd "$FLEET_DIR"
