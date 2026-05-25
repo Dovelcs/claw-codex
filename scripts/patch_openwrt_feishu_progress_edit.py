@@ -16,10 +16,18 @@ TARGETS = [
 
 PROGRESS_BLOCK = r'''def build_feishu_progress_card(task_id, text, *, done=False, error=False):
     content=str(text or '').strip() or ('已完成。' if done else '正在处理...')
-    if len(content) > int(os.environ.get('CODEX_FEISHU_PROGRESS_CARD_LIMIT','3000')):
+    if not (done or error) and len(content) > int(os.environ.get('CODEX_FEISHU_PROGRESS_CARD_LIMIT','3000')):
         content=content[-int(os.environ.get('CODEX_FEISHU_PROGRESS_CARD_LIMIT','3000')):]
     title='Codex 完成' if done and not error else 'Codex 失败' if error else 'Codex 处理中'
     template='green' if done and not error else 'red' if error else 'blue'
+    def markdown_elements(value):
+        chunk_size=max(500,min(3000,int(os.environ.get('CODEX_FEISHU_FINAL_CARD_CHUNK_SIZE','2800'))))
+        text=str(value or '')
+        chunks=[text[i:i+chunk_size] for i in range(0,len(text),chunk_size)] or ['']
+        elements=[{'tag':'markdown','content':chunk} for chunk in chunks if chunk]
+        elements.append({'tag':'hr'})
+        elements.append({'tag':'markdown','content':'任务：`'+str(task_id or '')+'`'})
+        return elements
     return {
         'schema':'2.0',
         'config':{'wide_screen_mode':True},
@@ -29,11 +37,7 @@ PROGRESS_BLOCK = r'''def build_feishu_progress_card(task_id, text, *, done=False
         },
         'body':{
             'direction':'vertical',
-            'elements':[
-                {'tag':'markdown','content':content},
-                {'tag':'hr'},
-                {'tag':'markdown','content':'任务：`'+str(task_id or '')+'`'},
-            ],
+            'elements':markdown_elements(content),
         },
     }
 
