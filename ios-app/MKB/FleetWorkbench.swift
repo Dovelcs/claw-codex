@@ -2425,12 +2425,18 @@ struct FleetCollapsibleRichMessageText: View {
     var compact = false
     var fillsWidth = true
     var speaker = "消息"
-    @State private var isExpanded = false
+    var defaultExpanded = false
+    var onExpansionChanged: ((Bool) -> Void)?
+    @State private var manualExpansion: Bool?
 
     private let collapsedHeight: CGFloat = 260
     private let compactCollapsedHeight: CGFloat = 180
     private let foldLineThreshold = 12
     private let foldCharacterThreshold = 700
+
+    private var isExpanded: Bool {
+        manualExpansion ?? defaultExpanded
+    }
 
     private var isFoldable: Bool {
         messageLineCount > foldLineThreshold || text.count > foldCharacterThreshold
@@ -2453,7 +2459,9 @@ struct FleetCollapsibleRichMessageText: View {
             if isFoldable {
                 Button {
                     withAnimation(.snappy(duration: 0.18)) {
-                        isExpanded.toggle()
+                        let nextExpansion = !isExpanded
+                        manualExpansion = nextExpansion
+                        onExpansionChanged?(nextExpansion)
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -2475,6 +2483,9 @@ struct FleetCollapsibleRichMessageText: View {
             }
         }
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+        .onChange(of: defaultExpanded) { _, _ in
+            manualExpansion = nil
+        }
     }
 }
 
@@ -3036,7 +3047,19 @@ struct FleetWorkbenchView: View {
                             emptyChatState
                         } else {
                             ForEach(visibleBubbles) { bubble in
-                                chatBubbleView(bubble)
+                                let isLatest = bubble.id == visibleBubbles.last?.id
+                                chatBubbleView(
+                                    bubble,
+                                    isLatest: isLatest,
+                                    onExpansionChanged: { _ in
+                                        guard isLatest else { return }
+                                        DispatchQueue.main.async {
+                                            withAnimation(.easeOut(duration: 0.18)) {
+                                                proxy.scrollTo(bubble.id, anchor: .bottom)
+                                            }
+                                        }
+                                    }
+                                )
                                     .id(bubble.id)
                             }
                         }
@@ -3259,14 +3282,25 @@ struct FleetWorkbenchView: View {
         return nil
     }
 
-    private func chatBubbleView(_ bubble: FleetChatBubble) -> some View {
+    private func chatBubbleView(
+        _ bubble: FleetChatBubble,
+        isLatest: Bool,
+        onExpansionChanged: ((Bool) -> Void)? = nil
+    ) -> some View {
         HStack {
             if bubble.isUser { Spacer(minLength: 44) }
             VStack(alignment: .leading, spacing: 6) {
                 Text(bubble.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                FleetCollapsibleRichMessageText(text: bubble.body, tint: bubble.tint, fillsWidth: !bubble.isUser, speaker: bubble.title)
+                FleetCollapsibleRichMessageText(
+                    text: bubble.body,
+                    tint: bubble.tint,
+                    fillsWidth: !bubble.isUser,
+                    speaker: bubble.title,
+                    defaultExpanded: isLatest,
+                    onExpansionChanged: onExpansionChanged
+                )
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -3521,7 +3555,19 @@ struct FleetWorkbenchView: View {
                             let v1Messages = store.visibleCodexMessages(for: sessionID)
                             if !v1Messages.isEmpty {
                                 ForEach(v1Messages) { message in
-                                    codexMessageBubble(message)
+                                    let isLatest = message.id == v1Messages.last?.id
+                                    codexMessageBubble(
+                                        message,
+                                        isLatest: isLatest,
+                                        onExpansionChanged: { _ in
+                                            guard isLatest else { return }
+                                            DispatchQueue.main.async {
+                                                withAnimation(.easeOut(duration: 0.18)) {
+                                                    proxy.scrollTo(message.id, anchor: .bottom)
+                                                }
+                                            }
+                                        }
+                                    )
                                         .id(message.id)
                                 }
                             } else {
@@ -3533,7 +3579,11 @@ struct FleetWorkbenchView: View {
                                         .frame(maxWidth: .infinity, minHeight: 240)
                                 } else {
                                     ForEach(tasks) { task in
-                                        conversationTaskRow(task, events: store.events(for: sessionID).filter { $0.task_id == task.task_id })
+                                        conversationTaskRow(
+                                            task,
+                                            events: store.events(for: sessionID).filter { $0.task_id == task.task_id },
+                                            isLatest: task.task_id == tasks.last?.task_id
+                                        )
                                     }
                                 }
                             }
@@ -4066,12 +4116,16 @@ struct FleetWorkbenchView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            FleetRichMessageText(text: message.text, tint: .primary)
+            FleetCollapsibleRichMessageText(text: message.text, tint: .primary, speaker: message.isUser ? "你" : "Codex")
         }
         .padding(.vertical, 4)
     }
 
-    private func codexMessageBubble(_ message: FleetCodexMessage) -> some View {
+    private func codexMessageBubble(
+        _ message: FleetCodexMessage,
+        isLatest: Bool,
+        onExpansionChanged: ((Bool) -> Void)? = nil
+    ) -> some View {
         let state = store.codexMessageStates[message.message_id]?.status ?? message.status ?? ""
         let suffix = !message.isUser && ["streaming", "running", "queued"].contains(state) ? "\n\n…" : ""
         return chatBubbleView(
@@ -4081,12 +4135,15 @@ struct FleetWorkbenchView: View {
                 body: message.text + suffix,
                 isUser: message.isUser,
                 tint: state == "failed" ? .red : .primary
-            )
+            ),
+            isLatest: isLatest,
+            onExpansionChanged: onExpansionChanged
         )
     }
 
-    private func conversationTaskRow(_ task: FleetTask, events: [FleetEvent]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+    private func conversationTaskRow(_ task: FleetTask, events: [FleetEvent], isLatest: Bool) -> some View {
+        let visibleEvents = events.filter { conversationEventTypes.contains($0.type) }
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("你")
                     .font(.caption.weight(.semibold))
@@ -4096,18 +4153,25 @@ struct FleetWorkbenchView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            FleetRichMessageText(text: task.prompt ?? "-", tint: .primary)
+            FleetCollapsibleRichMessageText(
+                text: task.prompt ?? "-",
+                tint: .primary,
+                speaker: "你",
+                defaultExpanded: isLatest && visibleEvents.isEmpty
+            )
 
-            ForEach(events.filter { conversationEventTypes.contains($0.type) }) { event in
+            ForEach(visibleEvents) { event in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(conversationEventTitle(event.type))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     if let message = event.message, !message.isEmpty {
-                        FleetRichMessageText(
+                        FleetCollapsibleRichMessageText(
                             text: message,
                             tint: event.type == "codex.thinking.delta" ? .secondary : .primary,
-                            compact: event.type == "codex.thinking.delta"
+                            compact: event.type == "codex.thinking.delta",
+                            speaker: conversationEventTitle(event.type),
+                            defaultExpanded: isLatest && event.id == visibleEvents.last?.id
                         )
                     }
                 }

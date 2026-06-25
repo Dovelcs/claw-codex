@@ -129,11 +129,13 @@ final class MKBUITests: XCTestCase {
         openHistory(in: app)
         tapHistoryRow(title: "Long Message Folding Fixture", in: app)
 
-        let expandUser = app.buttons["展开你消息"]
-        let expandCodex = app.buttons["展开Codex消息"]
-        XCTAssertTrue(expandUser.waitForExistence(timeout: 12), app.debugDescription)
-        XCTAssertTrue(expandCodex.waitForExistence(timeout: 12), app.debugDescription)
+        let collapseCodex = app.buttons["折叠Codex消息"]
+        XCTAssertTrue(collapseCodex.waitForExistence(timeout: 12), app.debugDescription)
+        collapseCodex.tap()
+        XCTAssertTrue(app.buttons["展开Codex消息"].waitForExistence(timeout: 5), app.debugDescription)
 
+        let expandUser = app.buttons["展开你消息"]
+        XCTAssertTrue(expandUser.waitForExistence(timeout: 12), app.debugDescription)
         expandUser.tap()
         XCTAssertTrue(app.buttons["折叠你消息"].waitForExistence(timeout: 5), app.debugDescription)
         app.buttons["折叠你消息"].tap()
