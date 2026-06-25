@@ -286,6 +286,7 @@ struct FleetV1CommandRequest: Encodable {
 struct FleetHistoryLoadRequest: Encodable {
     var endpoint_id: String
     var session_id: String
+    var force: Bool = false
 }
 
 struct FleetV1Command: Decodable {
@@ -1002,7 +1003,7 @@ final class FleetWorkbenchStore: ObservableObject {
         }
     }
 
-    private func fetchV1Messages(endpointID targetEndpointID: String, sessionID: String, requestHistoryLoad: Bool) async throws -> (String, [FleetCodexMessage]) {
+    private func fetchV1Messages(endpointID targetEndpointID: String, sessionID: String, requestHistoryLoad: Bool, forceHistoryReload: Bool = false) async throws -> (String, [FleetCodexMessage]) {
         let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
         var trimmedEndpointID = targetEndpointID.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmedEndpointID.isEmpty,
@@ -1011,12 +1012,16 @@ final class FleetWorkbenchStore: ObservableObject {
         }
         let historyKey = "\(trimmedEndpointID)|\(trimmedSessionID)"
         let isCurrentBridge = Self.isCurrentBridgeSessionID(trimmedSessionID)
-        if requestHistoryLoad && !disableHistoryLoadForUITests && !isCurrentBridge && !trimmedEndpointID.isEmpty && !loadedHistorySessionKeys.contains(historyKey) {
+        if requestHistoryLoad &&
+            !disableHistoryLoadForUITests &&
+            !isCurrentBridge &&
+            !trimmedEndpointID.isEmpty &&
+            (forceHistoryReload || !loadedHistorySessionKeys.contains(historyKey)) {
             let _: JSONValue? = try? await request(
                 JSONValue.self,
                 path: "/api/history/load",
                 method: "POST",
-                body: AnyEncodable(FleetHistoryLoadRequest(endpoint_id: trimmedEndpointID, session_id: trimmedSessionID))
+                body: AnyEncodable(FleetHistoryLoadRequest(endpoint_id: trimmedEndpointID, session_id: trimmedSessionID, force: forceHistoryReload))
             )
             loadedHistorySessionKeys.insert(historyKey)
         }
@@ -1085,7 +1090,7 @@ final class FleetWorkbenchStore: ObservableObject {
         }
     }
 
-    func loadHistoryV1Messages(endpointID targetEndpointID: String, sessionID: String, requestHistoryLoad: Bool = true) async {
+    func loadHistoryV1Messages(endpointID targetEndpointID: String, sessionID: String, requestHistoryLoad: Bool = true, forceHistoryReload: Bool = true) async {
         let trimmedSessionID = sessionID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedSessionID.isEmpty else { return }
         if useCodexFixtureForUITests {
@@ -1097,7 +1102,7 @@ final class FleetWorkbenchStore: ObservableObject {
         isLoadingSessionEvents = true
         defer { isLoadingSessionEvents = false }
         do {
-            let (_, orderedMessages) = try await fetchV1Messages(endpointID: targetEndpointID, sessionID: trimmedSessionID, requestHistoryLoad: requestHistoryLoad)
+            let (_, orderedMessages) = try await fetchV1Messages(endpointID: targetEndpointID, sessionID: trimmedSessionID, requestHistoryLoad: requestHistoryLoad, forceHistoryReload: forceHistoryReload)
             var nextMessages = historyCodexMessagesBySession
             nextMessages[trimmedSessionID] = orderedMessages
             historyCodexMessagesBySession = nextMessages
@@ -3419,18 +3424,27 @@ struct FleetWorkbenchView: View {
         .toolbarBackground(Color.fleetPlatform(.systemBackground), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task(id: sessionID) {
-            var shouldRequestHistoryLoad = true
+            var lastForcedHistoryLoadAt = Date.distantPast
             while !Swift.Task.isCancelled {
                 let session = store.sessions.first(where: { $0.session_id == sessionID })
                 if store.isV1Runtime || (session?.isCodexRuntimeCandidate ?? false) {
                     let endpointID = session?.endpoint_id ?? store.endpointID
-                    await store.loadHistoryV1Messages(endpointID: endpointID, sessionID: sessionID, requestHistoryLoad: shouldRequestHistoryLoad)
-                    shouldRequestHistoryLoad = false
+                    let now = Date()
+                    let shouldRefreshHistorySource = now.timeIntervalSince(lastForcedHistoryLoadAt) >= 2.5
+                    await store.loadHistoryV1Messages(
+                        endpointID: endpointID,
+                        sessionID: sessionID,
+                        requestHistoryLoad: shouldRefreshHistorySource,
+                        forceHistoryReload: shouldRefreshHistorySource
+                    )
+                    if shouldRefreshHistorySource {
+                        lastForcedHistoryLoadAt = now
+                    }
                 } else {
                     await store.loadSessionEvents(sessionID: sessionID)
                 }
                 let isCurrentRunningSession = sessionID == store.sessionSelector && store.hasRunningCodexMessage(in: sessionID)
-                let pollDelay: UInt64 = isCurrentRunningSession ? 100_000_000 : 2_500_000_000
+                let pollDelay: UInt64 = store.isV1Runtime || isCurrentRunningSession ? 100_000_000 : 2_500_000_000
                 try? await Swift.Task.sleep(nanoseconds: pollDelay)
             }
         }

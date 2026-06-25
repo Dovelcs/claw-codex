@@ -429,6 +429,8 @@ bool session_history_loaded_locked(const std::string& endpoint_id, const std::st
     return g_history_loaded_sessions.count(history_key(endpoint_id, session_id)) > 0;
 }
 
+constexpr size_t kV1HistorySessionsPerEndpointLimit = 300;
+
 bool contains_synthetic_mkb_test_marker(const std::string& text) {
     return text.find("MKBHISTORYTEST") != std::string::npos ||
            text.find("MKBHISTORYOK") != std::string::npos ||
@@ -465,12 +467,12 @@ bool should_gate_history_task_locked(const TaskRecord& task) {
     return !session_history_loaded_locked(task.endpoint_id, task.session_id);
 }
 
-HistoryLoadRequest queue_history_load_locked(const std::string& endpoint_id, const std::string& session_id) {
+HistoryLoadRequest queue_history_load_locked(const std::string& endpoint_id, const std::string& session_id, bool force = false) {
     HistoryLoadRequest request;
     request.endpoint_id = endpoint_id;
     request.session_id = session_id;
     request.requested_at = now_iso();
-    if (!session_id.empty() && !session_history_loaded_locked(endpoint_id, session_id)) {
+    if (!session_id.empty() && (force || !session_history_loaded_locked(endpoint_id, session_id))) {
         g_history_load_requests[history_key(endpoint_id, session_id)] = request;
         persist_state_locked();
     }
@@ -1062,7 +1064,7 @@ std::vector<Session> v1_sessions_limited_locked() {
     for (auto& kv : history_by_endpoint) {
         auto& sessions = kv.second;
         std::sort(sessions.begin(), sessions.end(), newer);
-        if (sessions.size() > 50) sessions.resize(50);
+        if (sessions.size() > kV1HistorySessionsPerEndpointLimit) sessions.resize(kV1HistorySessionsPerEndpointLimit);
         keep.insert(keep.end(), sessions.begin(), sessions.end());
     }
     std::sort(keep.begin(), keep.end(), newer);
@@ -2450,10 +2452,14 @@ Response handle_request(const Request& req) {
     if (req.path == "/api/history/load" && req.method == "POST") {
         std::string endpoint_id = json_string_field(req.body, "endpoint_id", g_endpoint.endpoint_id);
         std::string session_id = json_string_field(req.body, "session_id", "");
+        bool force = json_bool_field(req.body, "force", false);
         if (session_id.empty()) return make_response(400, "{\"error\":\"empty_session_id\"}");
         bool loaded = session_history_loaded_locked(endpoint_id, session_id);
-        HistoryLoadRequest request = loaded ? HistoryLoadRequest{endpoint_id, session_id, now_iso()} : queue_history_load_locked(endpoint_id, session_id);
-        return make_response(200, "{\"ok\":true,\"status\":" + q(loaded ? "loaded" : "queued") +
+        HistoryLoadRequest request = loaded && !force
+            ? HistoryLoadRequest{endpoint_id, session_id, now_iso()}
+            : queue_history_load_locked(endpoint_id, session_id, force);
+        return make_response(200, "{\"ok\":true,\"status\":" + q(loaded && !force ? "loaded" : "queued") +
+            ",\"forced\":" + std::string(force ? "true" : "false") +
             ",\"request\":" + history_load_request_json(request) + "}");
     }
     if (req.path == "/api/history/requests" && req.method == "GET") {

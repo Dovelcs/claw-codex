@@ -534,8 +534,8 @@ int main(int argc, char** argv) {
     std::string endpoint_id = env_or("MKB_CODEX_TRANSCRIPT_ENDPOINT", "quectel-lnx");
     std::string project_alias = env_or("MKB_CODEX_TRANSCRIPT_PROJECT", "codex-database");
     std::string source = env_or("MKB_CODEX_TRANSCRIPT_SOURCE", "codex-vscode");
-    int limit = std::atoi(env_or("MKB_CODEX_HISTORY_LIMIT", "50").c_str());
-    if (limit <= 0) limit = 50;
+    int limit = std::atoi(env_or("MKB_CODEX_HISTORY_LIMIT", "500").c_str());
+    if (limit <= 0) limit = 500;
     int request_limit = std::atoi(env_or("MKB_CODEX_HISTORY_REQUEST_LIMIT", "20").c_str());
     if (request_limit <= 0) request_limit = 20;
 

@@ -329,13 +329,22 @@ final class MKBUITests: XCTestCase {
 
     @MainActor
     private func waitForTextContaining(_ text: String, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
-        app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: timeout)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if textElement(containing: text, in: app).exists {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return false
     }
 
     @MainActor
     private func textElement(containing text: String, in app: XCUIApplication) -> XCUIElement {
         let staticText = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
         if staticText.exists { return staticText }
+        let labeledTextView = app.textViews.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        if labeledTextView.exists { return labeledTextView }
         let textView = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch
         if textView.exists { return textView }
         return app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch

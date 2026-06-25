@@ -27,7 +27,7 @@ unauthenticated on the public internet.
 - `GET /v1/messages`
 - `GET /v1/message_states`
 - `POST /v1/commands`
-- `POST /api/history/load`
+- `POST /api/history/load` with optional `force:true` to refresh a previously loaded transcript
 - `POST /api/workers/*`
 - `POST /api/transcript/session`
 - `POST /api/transcript/message`
