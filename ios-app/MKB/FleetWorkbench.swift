@@ -797,7 +797,7 @@ final class FleetWorkbenchStore: ObservableObject {
             let selectedSessionID = sessionSelector.trimmingCharacters(in: .whitespacesAndNewlines)
             if !selectedSessionID.isEmpty {
                 if codexMessageSessionID != selectedSessionID {
-                    codexMessages = []
+                    codexMessages = historyCodexMessagesBySession[selectedSessionID] ?? []
                     codexMessageStates = [:]
                     localPendingMessages = localPendingMessages.filter { $0.session_id == selectedSessionID }
                     codexMessageSessionID = selectedSessionID
@@ -886,7 +886,7 @@ final class FleetWorkbenchStore: ObservableObject {
             if let session = sessions.first(where: { $0.session_id == trimmed }) {
                 endpointID = session.endpoint_id
             }
-            codexMessages = []
+            codexMessages = historyCodexMessagesBySession[trimmed] ?? []
             localPendingMessages = localPendingMessages.filter { $0.session_id == trimmed }
             codexMessageStates = [:]
             streamStatusText = "已切换到会话 \(trimmed)"
@@ -1074,6 +1074,9 @@ final class FleetWorkbenchStore: ObservableObject {
             let (trimmedEndpointID, orderedMessages) = try await fetchV1Messages(endpointID: targetEndpointID, sessionID: trimmedSessionID, requestHistoryLoad: requestHistoryLoad)
             codexMessageSessionID = trimmedSessionID
             codexMessages = orderedMessages
+            var nextHistoryMessages = historyCodexMessagesBySession
+            nextHistoryMessages[trimmedSessionID] = orderedMessages
+            historyCodexMessagesBySession = nextHistoryMessages
             localPendingMessages.removeAll { pending in
                 codexMessages.contains { synced in
                     synced.session_id == pending.session_id &&
@@ -1637,6 +1640,7 @@ final class FleetWorkbenchStore: ObservableObject {
             if let firstSession = currentRuntimeSession(endpointID: trimmedEndpointID) {
                 sessionSelector = firstSession.session_id
                 endpointID = firstSession.endpoint_id
+                codexMessages = historyCodexMessagesBySession[firstSession.session_id] ?? []
                 streamStatusText = "已切换到 \(firstSession.session_id)"
                 Task {
                     await loadV1Messages(endpointID: firstSession.endpoint_id, sessionID: firstSession.session_id)
@@ -1696,7 +1700,7 @@ final class FleetWorkbenchStore: ObservableObject {
         let serverMessages: [FleetCodexMessage]
         if !directServerMessages.isEmpty {
             serverMessages = directServerMessages
-        } else if codexMessageSessionID == trimmedSessionID {
+        } else if codexMessageSessionID == trimmedSessionID, !codexMessages.isEmpty {
             serverMessages = codexMessages
         } else {
             serverMessages = cachedHistoryMessages
@@ -2093,7 +2097,7 @@ private struct FleetChatBubble: Identifiable {
 }
 
 private struct FleetScrollBottomPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
+    static var defaultValue: CGFloat = .greatestFiniteMagnitude
 
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
@@ -2794,7 +2798,6 @@ struct FleetWorkbenchView: View {
             displaySessionID,
             store.isV1Runtime ? "v1" : "legacy",
             store.codexMessageSessionID ?? "",
-            "\(store.codexMessages.count)",
             "\(store.sessions.count)"
         ].joined(separator: "|")
     }
