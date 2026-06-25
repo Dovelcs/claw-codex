@@ -1591,16 +1591,19 @@ final class FleetWorkbenchStore: ObservableObject {
         }
         let selectedSession = orderedSessions.first { session in
             session.session_id == selectedSessionID && (selectedEndpointID.isEmpty || session.endpoint_id == selectedEndpointID)
+        } ?? orderedSessions.first { session in
+            session.session_id == selectedSessionID
         }
         if !hasLaunchFixedCodexSessionTarget {
-            let shouldUseCurrentSourceSession = sessionPolicy != "fixed-session" || selectedSession == nil || (selectedSession?.isRelayPlaceholder ?? false)
-            if shouldUseCurrentSourceSession,
-               let firstSession = currentRuntimeSession(endpointID: selectedEndpointID, from: orderedSessions) {
-                selectedSessionID = firstSession.session_id
-                selectedEndpointID = firstSession.endpoint_id
-            } else if let selectedSession {
+            if sessionPolicy == "fixed-session" {
+                guard let selectedSession, !selectedSession.isRelayPlaceholder else {
+                    throw FleetWorkbenchLocalError.fixedCodexSessionUnavailable(selectedSessionID)
+                }
                 selectedSessionID = selectedSession.session_id
                 selectedEndpointID = selectedSession.endpoint_id
+            } else if let firstSession = currentRuntimeSession(endpointID: selectedEndpointID, from: orderedSessions) {
+                selectedSessionID = firstSession.session_id
+                selectedEndpointID = firstSession.endpoint_id
             }
         } else if let selectedSession {
             selectedSessionID = selectedSession.session_id
@@ -3639,6 +3642,9 @@ struct FleetWorkbenchView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.fleetPlatform(.systemBackground), for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .onAppear {
+            store.selectSession(sessionID)
+        }
         .task(id: sessionID) {
             var lastForcedHistoryLoadAt = Date.distantPast
             while !Swift.Task.isCancelled {

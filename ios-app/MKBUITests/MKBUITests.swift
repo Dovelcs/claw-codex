@@ -81,6 +81,20 @@ final class MKBUITests: XCTestCase {
     }
 
     @MainActor
+    func testHistoryDetailSendTargetsOpenedConversation() throws {
+        let app = launchApp()
+        openCompanyCodex(in: app)
+        openHistory(in: app)
+        tapHistoryRow(title: "检查 ADB 设备连接", in: app)
+
+        let stamp = String(Int(Date().timeIntervalSince1970))
+        let text = "fixture history target \(stamp)"
+        sendCodexMessage(text, in: app)
+        XCTAssertTrue(waitForTextContaining(text, in: app, timeout: 8), app.debugDescription)
+        XCTAssertTrue(waitForTextContaining("收到：\(text)", in: app, timeout: 8), app.debugDescription)
+    }
+
+    @MainActor
     func testCodexHistorySortsAndShowsMessages() throws {
         let app = launchApp()
         openCompanyCodex(in: app)
