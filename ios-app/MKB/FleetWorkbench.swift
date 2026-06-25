@@ -2091,6 +2091,10 @@ struct FleetRichMessageText: View {
     var compact = false
     var fillsWidth = true
     @State private var copiedSegmentID: Int?
+    @State private var codeExpansionOverrides: [Int: Bool] = [:]
+
+    private let collapsedCodeLineLimit = 8
+    private let longCodeLineThreshold = 14
 
     private var segments: [FleetMessageSegment] {
         FleetMessageParser.parse(text)
@@ -2103,9 +2107,9 @@ struct FleetRichMessageText: View {
                 case .paragraph:
                     paragraph(segment.text)
                 case .code(let language):
-                    copyableBlock(segment: segment, language: language, systemImage: "chevron.left.forwardslash.chevron.right")
+                    codeBlock(segment: segment, language: language)
                 case .command:
-                    copyableBlock(segment: segment, language: nil, systemImage: "terminal")
+                    commandBlock(segment: segment)
                 }
             }
         }
@@ -2129,39 +2133,96 @@ struct FleetRichMessageText: View {
         return Text(value)
     }
 
-    private func copyableBlock(segment: FleetMessageSegment, language: String?, systemImage: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func codeBlock(segment: FleetMessageSegment, language: String?) -> some View {
+        let lineCount = codeLineCount(segment.text)
+        let isFoldable = lineCount > collapsedCodeLineLimit
+        let defaultExpanded = lineCount <= longCodeLineThreshold
+        let isExpanded = codeExpansionOverrides[segment.id] ?? defaultExpanded
+        let displayedText = isFoldable && !isExpanded ? codePreview(segment.text) : segment.text
+
+        return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: systemImage)
+                Image(systemName: "curlybraces")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                if let language, !language.isEmpty {
+                Text("代码")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if let language = codeBlockLanguage(language) {
                     Text(language)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                if lineCount > 1 {
+                    Text("\(lineCount) 行")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
                 Spacer(minLength: 8)
-                Button {
-                    FleetClipboard.copy(segment.copyText)
-                    copiedSegmentID = segment.id
-                    Swift.Task {
-                        try? await Swift.Task.sleep(nanoseconds: 900_000_000)
-                        if copiedSegmentID == segment.id {
-                            copiedSegmentID = nil
+                if isFoldable {
+                    Button {
+                        withAnimation(.snappy(duration: 0.18)) {
+                            codeExpansionOverrides[segment.id] = !isExpanded
                         }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 28, height: 24)
                     }
-                } label: {
-                    Image(systemName: copiedSegmentID == segment.id ? "checkmark" : "doc.on.doc")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(copiedSegmentID == segment.id ? .green : .secondary)
-                        .frame(width: 28, height: 24)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(isExpanded ? "折叠代码块" : "展开代码块")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("复制")
+                copyButton(segment: segment, label: "复制代码")
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(Color.primary.opacity(0.035))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(displayedText)
+                    .font(.system(size: compact ? 12 : 13, weight: .regular, design: .monospaced))
+                    .lineSpacing(3)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(10)
+            }
+
+            if isFoldable && !isExpanded {
+                HStack(spacing: 4) {
+                    Image(systemName: "ellipsis")
+                        .font(.caption2.weight(.semibold))
+                    Text("已折叠 \(max(0, lineCount - collapsedCodeLineLimit)) 行")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+            }
+        }
+        .background(Color.fleetPlatform(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+
+    private func commandBlock(segment: FleetMessageSegment) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text("命令")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                copyButton(segment: segment, label: "复制命令")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.045))
 
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(segment.text)
@@ -2173,11 +2234,47 @@ struct FleetRichMessageText: View {
                     .padding(10)
             }
         }
-        .background(Color.fleetPlatform(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         )
+    }
+
+    private func copyButton(segment: FleetMessageSegment, label: String) -> some View {
+        Button {
+            FleetClipboard.copy(segment.copyText)
+            copiedSegmentID = segment.id
+            Swift.Task {
+                try? await Swift.Task.sleep(nanoseconds: 900_000_000)
+                if copiedSegmentID == segment.id {
+                    copiedSegmentID = nil
+                }
+            }
+        } label: {
+            Image(systemName: copiedSegmentID == segment.id ? "checkmark" : "doc.on.doc")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(copiedSegmentID == segment.id ? .green : .secondary)
+                .frame(width: 28, height: 24)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func codeBlockLanguage(_ language: String?) -> String? {
+        guard let language = language?.trimmingCharacters(in: .whitespacesAndNewlines), !language.isEmpty else {
+            return nil
+        }
+        return language
+    }
+
+    private func codeLineCount(_ value: String) -> Int {
+        max(1, value.split(separator: "\n", omittingEmptySubsequences: false).count)
+    }
+
+    private func codePreview(_ value: String) -> String {
+        let lines = value.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        return lines.prefix(collapsedCodeLineLimit).joined(separator: "\n")
     }
 }
 
