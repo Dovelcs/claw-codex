@@ -30,6 +30,19 @@ final class MKBUITests: XCTestCase {
     }
 
     @MainActor
+    func testMessageTextShowsNativeSelectionMenu() throws {
+        let app = launchApp()
+        let message = textElement(containing: "我已经接入 Codex API", in: app)
+        XCTAssertTrue(message.waitForExistence(timeout: 10), app.debugDescription)
+
+        message.press(forDuration: 1.2)
+        XCTAssertTrue(
+            waitForAnyElement(labeled: ["选择", "全选", "复制", "Select", "Select All", "Copy"], in: app, timeout: 5),
+            app.debugDescription
+        )
+    }
+
+    @MainActor
     func testCodexModelAndReasoningMenus() throws {
         let app = launchApp()
         openCompanyCodex(in: app)
@@ -317,6 +330,29 @@ final class MKBUITests: XCTestCase {
     @MainActor
     private func waitForTextContaining(_ text: String, in app: XCUIApplication, timeout: TimeInterval) -> Bool {
         app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch.waitForExistence(timeout: timeout)
+    }
+
+    @MainActor
+    private func textElement(containing text: String, in app: XCUIApplication) -> XCUIElement {
+        let staticText = app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+        if staticText.exists { return staticText }
+        let textView = app.textViews.matching(NSPredicate(format: "value CONTAINS %@", text)).firstMatch
+        if textView.exists { return textView }
+        return app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+    }
+
+    @MainActor
+    private func waitForAnyElement(labeled labels: [String], in app: XCUIApplication, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            for label in labels {
+                if app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", label)).firstMatch.exists {
+                    return true
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return false
     }
 
     @MainActor

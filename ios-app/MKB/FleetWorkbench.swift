@@ -2085,6 +2085,59 @@ private enum FleetClipboard {
     }
 }
 
+#if os(iOS)
+private struct FleetSelectableTextView: UIViewRepresentable {
+    let text: String
+    let font: UIFont
+    let textColor: UIColor
+    let lineSpacing: CGFloat
+    var accessibilityIdentifier: String?
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.backgroundColor = .clear
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isScrollEnabled = false
+        textView.dataDetectorTypes = []
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.adjustsFontForContentSizeCategory = true
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        textView.attributedText = attributedText()
+        textView.textColor = textColor
+        textView.font = font
+        textView.accessibilityIdentifier = accessibilityIdentifier
+        textView.accessibilityLabel = text
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView textView: UITextView, context: Context) -> CGSize? {
+        let width = proposal.width ?? max(textView.bounds.width, 320)
+        let measured = textView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(measured.height))
+    }
+
+    private func attributedText() -> NSAttributedString {
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = lineSpacing
+        paragraphStyle.lineBreakMode = .byWordWrapping
+        return NSAttributedString(
+            string: text,
+            attributes: [
+                .font: font,
+                .foregroundColor: textColor,
+                .paragraphStyle: paragraphStyle
+            ]
+        )
+    }
+}
+#endif
+
 struct FleetRichMessageText: View {
     let text: String
     let tint: Color
@@ -2117,6 +2170,16 @@ struct FleetRichMessageText: View {
     }
 
     private func paragraph(_ segment: FleetMessageSegment) -> some View {
+        #if os(iOS)
+        FleetSelectableTextView(
+            text: segment.text,
+            font: UIFont.preferredFont(forTextStyle: compact ? .footnote : .body),
+            textColor: .label,
+            lineSpacing: compact ? 2 : 4,
+            accessibilityIdentifier: "fleet-message-paragraph-\(segment.id)"
+        )
+        .fixedSize(horizontal: false, vertical: true)
+        #elseif os(macOS)
         markdownText(segment.text)
             .font(compact ? .footnote : .body)
             .lineSpacing(compact ? 2 : 4)
@@ -2126,6 +2189,7 @@ struct FleetRichMessageText: View {
             .contextMenu {
                 copyMenuButton(segment: segment, label: "复制文本")
             }
+        #endif
     }
 
     private func markdownText(_ value: String) -> Text {
