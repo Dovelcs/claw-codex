@@ -2308,10 +2308,13 @@ Response handle_request(const Request& req) {
                 g_sessions[task.session_id].active_turn_id.clear();
                 g_sessions[task.session_id].status = "idle";
             }
-            if (!terminal && (type == "desktop.injected" || type == "vscode.ipc.sent")) {
+            if (!terminal && type == "desktop.injected") {
                 task.status = "running";
                 task.phase = "desktop";
                 finish_worker_task_locked(worker_id, task_id);
+            } else if (!terminal && type == "vscode.ipc.sent") {
+                task.status = "running";
+                task.phase = "desktop";
             } else if (type == "task.completed") {
                 if (trim_copy(task.last_summary).empty() && task.phase == "desktop") {
                     type = "task.awaiting_output";

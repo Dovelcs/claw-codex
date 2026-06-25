@@ -1565,8 +1565,7 @@ bool run_codex_task(const Url& broker, const std::string& worker_id, const TaskP
     TaskPayload effective_task = task;
     bool fixed_history_resume = false;
     std::string vscode_ipc_mode = env_or("MKB_CODEX_WORKER_VSCODE_IPC");
-    std::string vscode_ipc_socket = default_vscode_ipc_socket_path();
-    if (vscode_ipc_mode == "1" || (!vscode_ipc_mode.empty() && vscode_ipc_mode != "0") || access(vscode_ipc_socket.c_str(), F_OK) == 0) {
+    if (vscode_ipc_mode == "1" || (!vscode_ipc_mode.empty() && vscode_ipc_mode != "0")) {
         if (run_vscode_ipc_task(broker, worker_id, task)) return true;
         fixed_history_resume = can_resume_fixed_history_task(task);
         if (fixed_history_resume) {

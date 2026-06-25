@@ -4,7 +4,8 @@
 Codex session history. It is a single C++ executable that forks internal worker
 and history-sync modes:
 
-- VS Code Codex IPC task forwarding.
+- Optional VS Code Codex IPC task forwarding. This is disabled by default and
+  must be explicitly enabled with `MKB_CODEX_WORKER_VSCODE_IPC=1`.
 - Codex session index publication from `~/.codex/session_index.jsonl`.
 - Lazy history transcript loading from `~/.codex/sessions`.
 - Batched transcript upload to the relay, with per-message fallback for older
@@ -29,6 +30,7 @@ make -C linux-agent
 Useful environment variables:
 
 ```sh
+MKB_CODEX_WORKER_VSCODE_IPC=0
 MKB_CODEX_WORKER_VSCODE_IPC_SOCKET=/tmp/codex-ipc/ipc-1000.sock
 MKB_CODEX_AGENT_HISTORY_INTERVAL=300
 MKB_CODEX_AGENT_HISTORY_REQUEST_INTERVAL_MS=100

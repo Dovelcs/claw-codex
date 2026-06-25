@@ -167,7 +167,7 @@ Options parse_args(int argc, char** argv) {
 void configure_worker_defaults() {
     set_env_default("MKB_CODEX_WORKER_ID", "company-linux-vscode-worker");
     set_env_default("MKB_CODEX_WORKER_LABEL", "Company Linux VS Code Codex");
-    set_env_default("MKB_CODEX_WORKER_VSCODE_IPC", "1");
+    set_env_default("MKB_CODEX_WORKER_VSCODE_IPC", "0");
     set_env_default("MKB_CODEX_WORKER_VSCODE_IPC_SOCKET", "/tmp/codex-ipc/ipc-" + std::to_string(getuid()) + ".sock");
     set_env_default("MKB_CODEX_WORKER_VSCODE_IPC_CLIENT_TYPE", "vscode");
     set_env_default("MKB_CODEX_WORKER_DEFAULT_CWD", env_or("HOME", "/tmp"));
