@@ -2105,7 +2105,7 @@ struct FleetRichMessageText: View {
             ForEach(segments) { segment in
                 switch segment.kind {
                 case .paragraph:
-                    paragraph(segment.text)
+                    paragraph(segment)
                 case .code(let language):
                     codeBlock(segment: segment, language: language)
                 case .command:
@@ -2116,13 +2116,16 @@ struct FleetRichMessageText: View {
         .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
     }
 
-    private func paragraph(_ value: String) -> some View {
-        markdownText(value)
+    private func paragraph(_ segment: FleetMessageSegment) -> some View {
+        markdownText(segment.text)
             .font(compact ? .footnote : .body)
             .lineSpacing(compact ? 2 : 4)
             .foregroundStyle(tint)
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
+            .contextMenu {
+                copyMenuButton(segment: segment, label: "复制文本")
+            }
     }
 
     private func markdownText(_ value: String) -> Text {
@@ -2206,6 +2209,9 @@ struct FleetRichMessageText: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
+        .contextMenu {
+            copyMenuButton(segment: segment, label: "复制代码")
+        }
     }
 
     private func commandBlock(segment: FleetMessageSegment) -> some View {
@@ -2239,18 +2245,14 @@ struct FleetRichMessageText: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .stroke(Color.primary.opacity(0.1), lineWidth: 0.5)
         )
+        .contextMenu {
+            copyMenuButton(segment: segment, label: "复制命令")
+        }
     }
 
     private func copyButton(segment: FleetMessageSegment, label: String) -> some View {
         Button {
-            FleetClipboard.copy(segment.copyText)
-            copiedSegmentID = segment.id
-            Swift.Task {
-                try? await Swift.Task.sleep(nanoseconds: 900_000_000)
-                if copiedSegmentID == segment.id {
-                    copiedSegmentID = nil
-                }
-            }
+            copySegment(segment)
         } label: {
             Image(systemName: copiedSegmentID == segment.id ? "checkmark" : "doc.on.doc")
                 .font(.caption.weight(.semibold))
@@ -2259,6 +2261,25 @@ struct FleetRichMessageText: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+    }
+
+    private func copyMenuButton(segment: FleetMessageSegment, label: String) -> some View {
+        Button {
+            copySegment(segment)
+        } label: {
+            Label(label, systemImage: "doc.on.doc")
+        }
+    }
+
+    private func copySegment(_ segment: FleetMessageSegment) {
+        FleetClipboard.copy(segment.copyText)
+        copiedSegmentID = segment.id
+        Swift.Task {
+            try? await Swift.Task.sleep(nanoseconds: 900_000_000)
+            if copiedSegmentID == segment.id {
+                copiedSegmentID = nil
+            }
+        }
     }
 
     private func codeBlockLanguage(_ language: String?) -> String? {
