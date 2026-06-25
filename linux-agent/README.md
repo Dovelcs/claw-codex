@@ -10,6 +10,10 @@ and history-sync modes:
 - Batched transcript upload to the relay, with per-message fallback for older
   relay deployments.
 
+The periodic history-index sync publishes titles only. Transcript content is
+loaded by the separate request worker using `--requests-only`, so opening an
+uncached conversation does not trigger a full history rollout.
+
 ## Build
 
 ```sh

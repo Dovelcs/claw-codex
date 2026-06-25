@@ -551,6 +551,9 @@ int main(int argc, char** argv) {
             if (scanned++ >= limit) break;
             if (post_session(broker, row, endpoint_id, project_alias, source)) ++indexed;
         }
+        std::cerr << "session-index sync done indexed=" << indexed
+                  << " requests=0 synced=0\n";
+        return 0;
     }
 
     auto requests = fetch_history_requests(broker, endpoint_id, request_limit);

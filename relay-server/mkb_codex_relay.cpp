@@ -162,6 +162,22 @@ std::map<std::string, std::vector<SteerControl>> g_task_steers;
 std::vector<Event> g_events;
 std::string g_state_path;
 bool g_state_loaded = false;
+int g_persist_defer_depth = 0;
+bool g_persist_deferred = false;
+
+struct PersistDeferral {
+    PersistDeferral() {
+        ++g_persist_defer_depth;
+    }
+
+    ~PersistDeferral() {
+        if (g_persist_defer_depth > 0) --g_persist_defer_depth;
+        if (g_persist_defer_depth == 0 && g_persist_deferred) {
+            g_persist_deferred = false;
+            persist_state_locked();
+        }
+    }
+};
 
 std::string trim_copy(const std::string& value) {
     size_t start = 0;
@@ -574,6 +590,10 @@ void ensure_parent_dirs(const std::string& path) {
 
 void persist_state_locked() {
     if (!g_state_loaded || g_state_path.empty()) return;
+    if (g_persist_defer_depth > 0) {
+        g_persist_deferred = true;
+        return;
+    }
     ensure_parent_dirs(g_state_path);
     std::string tmp_path = g_state_path + ".tmp";
     std::ofstream out(tmp_path, std::ios::trunc);
@@ -1506,6 +1526,7 @@ Response import_transcript_messages_locked(const std::string& body) {
     if (session_id.empty()) return make_response(400, "{\"error\":\"empty_session_id\"}");
     if (messages.empty()) return make_response(400, "{\"error\":\"empty_messages\"}");
 
+    PersistDeferral persist_once;
     int imported = 0;
     int ignored = 0;
     for (size_t i = 0; i < messages.size(); ++i) {
