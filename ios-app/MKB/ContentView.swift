@@ -1557,13 +1557,10 @@ struct MessageBubble: View {
             case .user:
                 HStack(alignment: .bottom) {
                     Spacer(minLength: 48)
-                    Text(message.text)
-                        .font(.body)
-                        .textSelection(.enabled)
+                    FleetRichMessageText(text: message.text, tint: .primary, fillsWidth: false)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
                         .background(Color.platform(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                        .foregroundStyle(.primary)
                 }
             case .assistant:
                 HStack(alignment: .top, spacing: 12) {
@@ -1574,11 +1571,7 @@ struct MessageBubble: View {
                         } else if message.text == "思考完成，正在生成正式回答..." {
                             ThinkingStatusView(label: "生成正式回答")
                         } else {
-                            Text(message.text)
-                                .font(.body)
-                                .lineSpacing(3)
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            FleetRichMessageText(text: message.text, tint: .primary)
                         }
                     }
                     Spacer(minLength: 0)

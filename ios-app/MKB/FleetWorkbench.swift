@@ -1,6 +1,11 @@
 import Combine
 import Foundation
 import SwiftUI
+#if os(iOS)
+import UIKit
+#elseif os(macOS)
+import AppKit
+#endif
 
 private enum FleetWorkbenchLocalError: LocalizedError {
     case fixedCodexSessionUnavailable(String)
@@ -2056,6 +2061,236 @@ private struct FleetChatBubble: Identifiable {
     let tint: Color
 }
 
+enum FleetMessageSegmentKind {
+    case paragraph
+    case code(language: String?)
+    case command
+}
+
+struct FleetMessageSegment: Identifiable {
+    let id: Int
+    let kind: FleetMessageSegmentKind
+    let text: String
+    let copyText: String
+}
+
+private enum FleetClipboard {
+    static func copy(_ text: String) {
+        #if os(iOS)
+        UIPasteboard.general.string = text
+        #elseif os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #endif
+    }
+}
+
+struct FleetRichMessageText: View {
+    let text: String
+    let tint: Color
+    var compact = false
+    var fillsWidth = true
+    @State private var copiedSegmentID: Int?
+
+    private var segments: [FleetMessageSegment] {
+        FleetMessageParser.parse(text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: compact ? 6 : 9) {
+            ForEach(segments) { segment in
+                switch segment.kind {
+                case .paragraph:
+                    paragraph(segment.text)
+                case .code(let language):
+                    copyableBlock(segment: segment, language: language, systemImage: "chevron.left.forwardslash.chevron.right")
+                case .command:
+                    copyableBlock(segment: segment, language: nil, systemImage: "terminal")
+                }
+            }
+        }
+        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+    }
+
+    private func paragraph(_ value: String) -> some View {
+        markdownText(value)
+            .font(compact ? .footnote : .body)
+            .lineSpacing(compact ? 2 : 4)
+            .foregroundStyle(tint)
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func markdownText(_ value: String) -> Text {
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        if let attributed = try? AttributedString(markdown: value, options: options) {
+            return Text(attributed)
+        }
+        return Text(value)
+    }
+
+    private func copyableBlock(segment: FleetMessageSegment, language: String?, systemImage: String) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                if let language, !language.isEmpty {
+                    Text(language)
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 8)
+                Button {
+                    FleetClipboard.copy(segment.copyText)
+                    copiedSegmentID = segment.id
+                    Swift.Task {
+                        try? await Swift.Task.sleep(nanoseconds: 900_000_000)
+                        if copiedSegmentID == segment.id {
+                            copiedSegmentID = nil
+                        }
+                    }
+                } label: {
+                    Image(systemName: copiedSegmentID == segment.id ? "checkmark" : "doc.on.doc")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(copiedSegmentID == segment.id ? .green : .secondary)
+                        .frame(width: 28, height: 24)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("复制")
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.primary.opacity(0.035))
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(segment.text)
+                    .font(.system(size: compact ? 12 : 13, weight: .regular, design: .monospaced))
+                    .lineSpacing(3)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(10)
+            }
+        }
+        .background(Color.fleetPlatform(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+}
+
+enum FleetMessageParser {
+    static func parse(_ text: String) -> [FleetMessageSegment] {
+        let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
+        var segments: [FleetMessageSegment] = []
+        var paragraphLines: [String] = []
+        var commandLines: [String] = []
+        var codeLines: [String] = []
+        var codeLanguage: String?
+        var inCodeFence = false
+        var segmentID = 0
+
+        func nextID() -> Int {
+            defer { segmentID += 1 }
+            return segmentID
+        }
+
+        func flushParagraph() {
+            let joined = paragraphLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            paragraphLines.removeAll()
+            guard !joined.isEmpty else { return }
+            segments.append(FleetMessageSegment(id: nextID(), kind: .paragraph, text: joined, copyText: joined))
+        }
+
+        func flushCommands() {
+            let display = commandLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            commandLines.removeAll()
+            guard !display.isEmpty else { return }
+            let copy = display
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { cleanedCommandLine(String($0)) }
+                .joined(separator: "\n")
+            segments.append(FleetMessageSegment(id: nextID(), kind: .command, text: copy, copyText: copy))
+        }
+
+        func flushCode() {
+            let code = codeLines.joined(separator: "\n").trimmingCharacters(in: .newlines)
+            codeLines.removeAll()
+            guard !code.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+            segments.append(FleetMessageSegment(id: nextID(), kind: .code(language: codeLanguage), text: code, copyText: code))
+            codeLanguage = nil
+        }
+
+        for line in normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("```") {
+                if inCodeFence {
+                    inCodeFence = false
+                    flushCode()
+                } else {
+                    flushParagraph()
+                    flushCommands()
+                    inCodeFence = true
+                    codeLanguage = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                continue
+            }
+
+            if inCodeFence {
+                codeLines.append(line)
+                continue
+            }
+
+            if trimmed.isEmpty {
+                flushParagraph()
+                flushCommands()
+                continue
+            }
+
+            if looksLikeCommand(trimmed) ||
+                commandLines.last?.trimmingCharacters(in: .whitespaces).hasSuffix("\\") == true {
+                flushParagraph()
+                commandLines.append(line)
+                continue
+            }
+
+            flushCommands()
+            paragraphLines.append(line)
+        }
+
+        if inCodeFence {
+            flushCode()
+        }
+        flushParagraph()
+        flushCommands()
+        return segments.isEmpty ? [FleetMessageSegment(id: 0, kind: .paragraph, text: text, copyText: text)] : segments
+    }
+
+    private static func looksLikeCommand(_ line: String) -> Bool {
+        if line.hasPrefix("$ ") || line.hasPrefix("% ") || line.hasPrefix("➜ ") { return true }
+        if line.hasPrefix("./") || line.hasPrefix("~/") { return true }
+        if line.contains("：") || line.contains("。") { return false }
+        let commandHeads: Set<String> = [
+            "adb", "awk", "brew", "cat", "cd", "chmod", "chown", "cp", "curl",
+            "docker", "export", "find", "git", "grep", "kill", "kubectl", "ls",
+            "make", "mkdir", "mv", "npm", "pnpm", "python", "python3", "rm",
+            "rg", "scp", "sed", "ssh", "sudo", "swift", "tar", "xcodebuild", "yarn"
+        ]
+        guard let head = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).first else { return false }
+        return commandHeads.contains(String(head))
+    }
+
+    private static func cleanedCommandLine(_ line: String) -> String {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        for prefix in ["$ ", "% ", "➜ "] where trimmed.hasPrefix(prefix) {
+            return String(trimmed.dropFirst(prefix.count))
+        }
+        return trimmed
+    }
+}
+
 struct FleetWorkbenchView: View {
     @StateObject private var store = FleetWorkbenchStore()
     var openKnowledge: () -> Void = {}
@@ -2708,10 +2943,7 @@ struct FleetWorkbenchView: View {
                 Text(bubble.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                Text(bubble.body)
-                    .font(.body)
-                    .foregroundStyle(bubble.tint)
-                    .textSelection(.enabled)
+                FleetRichMessageText(text: bubble.body, tint: bubble.tint, fillsWidth: !bubble.isUser)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -3472,9 +3704,7 @@ struct FleetWorkbenchView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Text(message.text)
-                .font(.body)
-                .textSelection(.enabled)
+            FleetRichMessageText(text: message.text, tint: .primary)
         }
         .padding(.vertical, 4)
     }
@@ -3504,9 +3734,7 @@ struct FleetWorkbenchView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Text(task.prompt ?? "-")
-                .font(.body)
-                .textSelection(.enabled)
+            FleetRichMessageText(text: task.prompt ?? "-", tint: .primary)
 
             ForEach(events.filter { conversationEventTypes.contains($0.type) }) { event in
                 VStack(alignment: .leading, spacing: 4) {
@@ -3514,10 +3742,11 @@ struct FleetWorkbenchView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                     if let message = event.message, !message.isEmpty {
-                        Text(message)
-                            .font(event.type == "codex.thinking.delta" ? .footnote.monospaced() : .body)
-                            .foregroundStyle(event.type == "codex.thinking.delta" ? .secondary : .primary)
-                            .textSelection(.enabled)
+                        FleetRichMessageText(
+                            text: message,
+                            tint: event.type == "codex.thinking.delta" ? .secondary : .primary,
+                            compact: event.type == "codex.thinking.delta"
+                        )
                     }
                 }
                 .padding(.top, 2)
