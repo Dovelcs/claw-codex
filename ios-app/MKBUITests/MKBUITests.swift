@@ -103,6 +103,26 @@ final class MKBUITests: XCTestCase {
     }
 
     @MainActor
+    func testCodexHistoryScrollPositionSurvivesPolling() throws {
+        let app = launchApp(fixedSessionID: "fixture-long-scroll")
+        openCompanyCodex(in: app)
+        openHistory(in: app)
+        tapHistoryRow(title: "Long Scroll Fixture", in: app)
+        XCTAssertTrue(waitForTextContaining("Scroll fixture 44", in: app, timeout: 12), app.debugDescription)
+
+        for _ in 0..<5 {
+            app.swipeDown()
+        }
+        let midScrollMarkers = (1...43).map { String(format: "Scroll fixture %02d", $0) }
+        let preservedMarker = waitForFirstTextContaining(midScrollMarkers, in: app, timeout: 10)
+        XCTAssertNotNil(preservedMarker, app.debugDescription)
+        XCTAssertFalse(waitForTextContaining("Scroll fixture 44", in: app, timeout: 1), app.debugDescription)
+        RunLoop.current.run(until: Date().addingTimeInterval(3.2))
+        XCTAssertTrue(waitForTextContaining(preservedMarker!, in: app, timeout: 2), app.debugDescription)
+        XCTAssertFalse(waitForTextContaining("Scroll fixture 44", in: app, timeout: 1), app.debugDescription)
+    }
+
+    @MainActor
     func testCodexSourceSwitchesHistoryScope() throws {
         let app = launchApp()
         openCompanyCodex(in: app)
@@ -337,6 +357,18 @@ final class MKBUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return false
+    }
+
+    @MainActor
+    private func waitForFirstTextContaining(_ texts: [String], in app: XCUIApplication, timeout: TimeInterval) -> String? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            for text in texts where textElement(containing: text, in: app).exists {
+                return text
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        return nil
     }
 
     @MainActor

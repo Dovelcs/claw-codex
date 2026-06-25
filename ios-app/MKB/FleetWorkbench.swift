@@ -718,6 +718,7 @@ final class FleetWorkbenchStore: ObservableObject {
             FleetSession(session_id: "fixture-test", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "Test", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-test-thread", active_turn_id: nil, updated_at: "2026-06-23T10:02:00Z"),
             FleetSession(session_id: "fixture-adb", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "检查 ADB 设备连接", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-adb-thread", active_turn_id: nil, updated_at: "2026-06-23T09:58:00Z"),
             FleetSession(session_id: "fixture-gerrit", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "查找 Gerrit 密钥", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-gerrit-thread", active_turn_id: nil, updated_at: "2026-06-23T09:55:00Z"),
+            FleetSession(session_id: "fixture-long-scroll", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "Long Scroll Fixture", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-long-scroll-thread", active_turn_id: nil, updated_at: "2026-06-23T09:54:00Z"),
             FleetSession(session_id: "fixture-lab-test", endpoint_id: "lab-vscode", source: "codex-vscode", title: "Lab Test", cwd: "/workspace", rollout_path: nil, status: "synced", thread_id: "fixture-lab-thread", active_turn_id: nil, updated_at: "2026-06-23T09:57:00Z")
         ]
     }
@@ -1516,7 +1517,32 @@ final class FleetWorkbenchStore: ObservableObject {
     }
 
     private func fixtureAllMessages(for sessionID: String) -> [FleetCodexMessage] {
-        historyCodexMessagesBySession[sessionID] ?? fixtureMessages().filter { $0.session_id == sessionID }
+        if let messages = historyCodexMessagesBySession[sessionID] {
+            return messages
+        }
+        if sessionID == "fixture-long-scroll" {
+            return fixtureLongScrollMessages()
+        }
+        return fixtureMessages().filter { $0.session_id == sessionID }
+    }
+
+    private func fixtureLongScrollMessages() -> [FleetCodexMessage] {
+        (1...44).map { index in
+            let role = index.isMultiple(of: 2) ? "assistant" : "user"
+            let speaker = role == "user" ? "user" : "assistant"
+            let marker = String(format: "%02d", index)
+            return FleetCodexMessage(
+                endpoint_id: "quectel-lnx",
+                session_id: "fixture-long-scroll",
+                message_id: "fixture-long-scroll-\(marker)",
+                turn_id: "fixture-long-scroll-turn-\((index + 1) / 2)",
+                seq: index,
+                role: role,
+                text: "Scroll fixture \(marker) \(speaker) message. 这是一条用于验证历史会话滚动稳定性的长文本，轮询刷新时不能把用户正在查看的位置拉回底部。",
+                status: "completed",
+                updated_at: "2026-06-23T09:54:\(marker)Z"
+            )
+        }
     }
 
     private func fixtureReply(for text: String) -> String {
@@ -2066,6 +2092,14 @@ private struct FleetChatBubble: Identifiable {
     let tint: Color
 }
 
+private struct FleetScrollBottomPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 enum FleetMessageSegmentKind {
     case paragraph
     case code(language: String?)
@@ -2483,7 +2517,12 @@ struct FleetWorkbenchView: View {
     var openKnowledge: () -> Void = {}
     @State private var mode: FleetWorkbenchMode = .overview
     @State private var navigationPath: [String] = []
+    @State private var mainTimelineIsNearBottom = true
+    @State private var mainTimelineInitialScrolledSessionID: String?
+    @State private var historyDetailIsNearBottomBySession: [String: Bool] = [:]
+    @State private var historyDetailInitialScrolledSessionIDs: Set<String> = []
     private let historyRouteID = "__mkb_history_sessions__"
+    private let autoScrollBottomTolerance: CGFloat = 80
     private let modelOptions = [
         FleetCodexOption(title: "gpt-5.5", value: "gpt-5.5"),
         FleetCodexOption(title: "gpt-5.4", value: "gpt-5.4"),
@@ -2913,38 +2952,60 @@ struct FleetWorkbenchView: View {
     private var chatTimeline: some View {
         let visibleBubbles = Array(chatBubbles.suffix(30))
         let bottomID = "codex-main-bottom"
-        return ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if visibleBubbles.isEmpty {
-                        emptyChatState
-                    } else {
-                        ForEach(visibleBubbles) { bubble in
-                            chatBubbleView(bubble)
+        let scrollSpace = "codex-main-scroll"
+        return GeometryReader { viewport in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if visibleBubbles.isEmpty {
+                            emptyChatState
+                        } else {
+                            ForEach(visibleBubbles) { bubble in
+                                chatBubbleView(bubble)
+                                    .id(bubble.id)
+                            }
                         }
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomID)
+                            .background(
+                                GeometryReader { marker in
+                                    Color.clear.preference(
+                                        key: FleetScrollBottomPreferenceKey.self,
+                                        value: marker.frame(in: .named(scrollSpace)).maxY
+                                    )
+                                }
+                            )
                     }
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomID)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 18)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 18)
-            }
-            .defaultScrollAnchor(.bottom)
-            .onChange(of: visibleBubbles.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
+                .coordinateSpace(name: scrollSpace)
+                .onPreferenceChange(FleetScrollBottomPreferenceKey.self) { bottomMaxY in
+                    mainTimelineIsNearBottom = bottomMaxY <= viewport.size.height + autoScrollBottomTolerance
                 }
-            }
-            .onChange(of: visibleBubbles.last?.id) { _, _ in
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
+                .onChange(of: visibleBubbles.count) { _, _ in
+                    let didInitialScroll = mainTimelineInitialScrolledSessionID == displaySessionID
+                    guard !didInitialScroll || mainTimelineIsNearBottom else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(visibleBubbles.last?.id ?? bottomID, anchor: .bottom)
+                    }
                 }
-            }
-            .task(id: visibleBubbles.last?.id ?? "empty") {
-                try? await Swift.Task.sleep(nanoseconds: 120_000_000)
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(bottomID, anchor: .bottom)
+                .onChange(of: visibleBubbles.last?.id) { _, _ in
+                    let didInitialScroll = mainTimelineInitialScrolledSessionID == displaySessionID
+                    guard !didInitialScroll || mainTimelineIsNearBottom else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(visibleBubbles.last?.id ?? bottomID, anchor: .bottom)
+                    }
+                }
+                .task(id: "\(displaySessionID)-\(visibleBubbles.last?.id ?? "empty")") {
+                    guard !visibleBubbles.isEmpty else { return }
+                    guard mainTimelineInitialScrolledSessionID != displaySessionID || mainTimelineIsNearBottom else { return }
+                    for _ in 0..<4 {
+                        try? await Swift.Task.sleep(nanoseconds: 120_000_000)
+                        proxy.scrollTo(visibleBubbles.last?.id ?? bottomID, anchor: .bottom)
+                    }
+                    mainTimelineInitialScrolledSessionID = displaySessionID
                 }
             }
         }
@@ -3368,6 +3429,8 @@ struct FleetWorkbenchView: View {
     }
 
     private func openHistorySession(_ sessionID: String) {
+        historyDetailIsNearBottomBySession[sessionID] = true
+        historyDetailInitialScrolledSessionIDs.remove(sessionID)
         store.selectSession(sessionID)
         navigationPath.append(sessionID)
     }
@@ -3375,43 +3438,71 @@ struct FleetWorkbenchView: View {
     private func sessionDetailContent(sessionID: String) -> some View {
         VStack(spacing: 0) {
             let bottomID = "codex-bottom-\(sessionID)"
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 14) {
-                        let v1Messages = store.visibleCodexMessages(for: sessionID)
-                        if !v1Messages.isEmpty {
-                            ForEach(v1Messages) { message in
-                                codexMessageBubble(message)
-                            }
-                        } else {
-                            let tasks = store.tasks(for: sessionID)
-                            if tasks.isEmpty {
-                                Text(store.isLoadingSessionEvents ? "加载中" : "暂无消息")
-                                    .font(.callout)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, minHeight: 240)
+            let scrollSpace = "codex-detail-scroll-\(sessionID)"
+            GeometryReader { viewport in
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 14) {
+                            let v1Messages = store.visibleCodexMessages(for: sessionID)
+                            if !v1Messages.isEmpty {
+                                ForEach(v1Messages) { message in
+                                    codexMessageBubble(message)
+                                        .id(message.id)
+                                }
                             } else {
-                                ForEach(tasks) { task in
-                                    conversationTaskRow(task, events: store.events(for: sessionID).filter { $0.task_id == task.task_id })
+                                let tasks = store.tasks(for: sessionID)
+                                if tasks.isEmpty {
+                                    Text(store.isLoadingSessionEvents ? "加载中" : "暂无消息")
+                                        .font(.callout)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, minHeight: 240)
+                                } else {
+                                    ForEach(tasks) { task in
+                                        conversationTaskRow(task, events: store.events(for: sessionID).filter { $0.task_id == task.task_id })
+                                    }
                                 }
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id(bottomID)
+                                .background(
+                                    GeometryReader { marker in
+                                        Color.clear.preference(
+                                            key: FleetScrollBottomPreferenceKey.self,
+                                            value: marker.frame(in: .named(scrollSpace)).maxY
+                                        )
+                                    }
+                                )
                         }
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomID)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 18)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 18)
-                }
-                .defaultScrollAnchor(.bottom)
-                .onChange(of: store.visibleCodexMessages(for: sessionID).count) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(bottomID, anchor: .bottom)
+                    .coordinateSpace(name: scrollSpace)
+                    .onPreferenceChange(FleetScrollBottomPreferenceKey.self) { bottomMaxY in
+                        historyDetailIsNearBottomBySession[sessionID] = bottomMaxY <= viewport.size.height + autoScrollBottomTolerance
                     }
-                }
-                .onChange(of: store.visibleCodexMessages(for: sessionID).last?.id) { _, _ in
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(bottomID, anchor: .bottom)
+                    .onChange(of: store.visibleCodexMessages(for: sessionID).count) { _, _ in
+                        let didInitialScroll = historyDetailInitialScrolledSessionIDs.contains(sessionID)
+                        guard !didInitialScroll || (historyDetailIsNearBottomBySession[sessionID] ?? true) else { return }
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo(store.visibleCodexMessages(for: sessionID).last?.id ?? bottomID, anchor: .bottom)
+                        }
+                    }
+                    .onChange(of: store.visibleCodexMessages(for: sessionID).last?.id) { _, _ in
+                        let didInitialScroll = historyDetailInitialScrolledSessionIDs.contains(sessionID)
+                        guard !didInitialScroll || (historyDetailIsNearBottomBySession[sessionID] ?? true) else { return }
+                        withAnimation(.easeOut(duration: 0.18)) {
+                            proxy.scrollTo(store.visibleCodexMessages(for: sessionID).last?.id ?? bottomID, anchor: .bottom)
+                        }
+                    }
+                    .task(id: "\(sessionID)-\(store.visibleCodexMessages(for: sessionID).last?.id ?? "empty")") {
+                        guard !store.visibleCodexMessages(for: sessionID).isEmpty else { return }
+                        guard !historyDetailInitialScrolledSessionIDs.contains(sessionID) || (historyDetailIsNearBottomBySession[sessionID] ?? true) else { return }
+                        for _ in 0..<4 {
+                            try? await Swift.Task.sleep(nanoseconds: 120_000_000)
+                            proxy.scrollTo(store.visibleCodexMessages(for: sessionID).last?.id ?? bottomID, anchor: .bottom)
+                        }
+                        historyDetailInitialScrolledSessionIDs.insert(sessionID)
                     }
                 }
             }
