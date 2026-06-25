@@ -719,6 +719,7 @@ final class FleetWorkbenchStore: ObservableObject {
             FleetSession(session_id: "fixture-adb", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "检查 ADB 设备连接", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-adb-thread", active_turn_id: nil, updated_at: "2026-06-23T09:58:00Z"),
             FleetSession(session_id: "fixture-gerrit", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "查找 Gerrit 密钥", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-gerrit-thread", active_turn_id: nil, updated_at: "2026-06-23T09:55:00Z"),
             FleetSession(session_id: "fixture-long-scroll", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "Long Scroll Fixture", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-long-scroll-thread", active_turn_id: nil, updated_at: "2026-06-23T09:54:00Z"),
+            FleetSession(session_id: "fixture-folding", endpoint_id: "quectel-lnx", source: "codex-vscode", title: "Long Message Folding Fixture", cwd: "/home/donovan/work", rollout_path: nil, status: "synced", thread_id: "fixture-folding-thread", active_turn_id: nil, updated_at: "2026-06-23T10:03:00Z"),
             FleetSession(session_id: "fixture-lab-test", endpoint_id: "lab-vscode", source: "codex-vscode", title: "Lab Test", cwd: "/workspace", rollout_path: nil, status: "synced", thread_id: "fixture-lab-thread", active_turn_id: nil, updated_at: "2026-06-23T09:57:00Z")
         ]
     }
@@ -1526,6 +1527,9 @@ final class FleetWorkbenchStore: ObservableObject {
         if sessionID == "fixture-long-scroll" {
             return fixtureLongScrollMessages()
         }
+        if sessionID == "fixture-folding" {
+            return fixtureFoldingMessages()
+        }
         return fixtureMessages().filter { $0.session_id == sessionID }
     }
 
@@ -1546,6 +1550,15 @@ final class FleetWorkbenchStore: ObservableObject {
                 updated_at: "2026-06-23T09:54:\(marker)Z"
             )
         }
+    }
+
+    private func fixtureFoldingMessages() -> [FleetCodexMessage] {
+        let userText = Array(repeating: "USER-FOLD-CONTENT 这是一段用户输入的长上下文，需要在手机端默认折叠，但展开后仍然可以完整选择和复制。", count: 16).joined(separator: "\n")
+        let codexText = Array(repeating: "CODEX-FOLD-CONTENT 这是一段 Codex 回复的长上下文，需要和用户消息使用同样的折叠/展开交互，避免长消息把屏幕完全撑满。", count: 18).joined(separator: "\n")
+        return [
+            FleetCodexMessage(endpoint_id: "quectel-lnx", session_id: "fixture-folding", message_id: "fixture-folding-user", turn_id: "fixture-folding-turn", seq: 1, role: "user", text: userText, status: "completed", updated_at: "2026-06-23T09:53:00Z"),
+            FleetCodexMessage(endpoint_id: "quectel-lnx", session_id: "fixture-folding", message_id: "fixture-folding-assistant", turn_id: "fixture-folding-turn", seq: 2, role: "assistant", text: codexText, status: "completed", updated_at: "2026-06-23T09:53:10Z")
+        ]
     }
 
     private func fixtureReply(for text: String) -> String {
@@ -2406,6 +2419,65 @@ struct FleetRichMessageText: View {
     }
 }
 
+struct FleetCollapsibleRichMessageText: View {
+    let text: String
+    let tint: Color
+    var compact = false
+    var fillsWidth = true
+    var speaker = "消息"
+    @State private var isExpanded = false
+
+    private let collapsedHeight: CGFloat = 260
+    private let compactCollapsedHeight: CGFloat = 180
+    private let foldLineThreshold = 12
+    private let foldCharacterThreshold = 700
+
+    private var isFoldable: Bool {
+        messageLineCount > foldLineThreshold || text.count > foldCharacterThreshold
+    }
+
+    private var messageLineCount: Int {
+        max(1, text.split(separator: "\n", omittingEmptySubsequences: false).count)
+    }
+
+    private var hiddenLineEstimate: Int {
+        max(0, messageLineCount - foldLineThreshold)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            FleetRichMessageText(text: text, tint: tint, compact: compact, fillsWidth: fillsWidth)
+                .frame(maxHeight: isFoldable && !isExpanded ? (compact ? compactCollapsedHeight : collapsedHeight) : nil, alignment: .top)
+                .clipped()
+
+            if isFoldable {
+                Button {
+                    withAnimation(.snappy(duration: 0.18)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                            .font(.caption.weight(.semibold))
+                        Text(isExpanded ? "收起" : "展开全文")
+                            .font(.caption.weight(.semibold))
+                        if !isExpanded && hiddenLineEstimate > 0 {
+                            Text("\(hiddenLineEstimate) 行")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isExpanded ? "折叠\(speaker)消息" : "展开\(speaker)消息")
+            }
+        }
+        .frame(maxWidth: fillsWidth ? .infinity : nil, alignment: .leading)
+    }
+}
+
 enum FleetMessageParser {
     static func parse(_ text: String) -> [FleetMessageSegment] {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -3194,7 +3266,7 @@ struct FleetWorkbenchView: View {
                 Text(bubble.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
-                FleetRichMessageText(text: bubble.body, tint: bubble.tint, fillsWidth: !bubble.isUser)
+                FleetCollapsibleRichMessageText(text: bubble.body, tint: bubble.tint, fillsWidth: !bubble.isUser, speaker: bubble.title)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

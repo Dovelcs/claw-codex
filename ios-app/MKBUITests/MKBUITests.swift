@@ -123,6 +123,27 @@ final class MKBUITests: XCTestCase {
     }
 
     @MainActor
+    func testLongUserAndCodexMessagesCanCollapseAndExpand() throws {
+        let app = launchApp(fixedSessionID: "fixture-folding")
+        openCompanyCodex(in: app)
+        openHistory(in: app)
+        tapHistoryRow(title: "Long Message Folding Fixture", in: app)
+
+        let expandUser = app.buttons["展开你消息"]
+        let expandCodex = app.buttons["展开Codex消息"]
+        XCTAssertTrue(expandUser.waitForExistence(timeout: 12), app.debugDescription)
+        XCTAssertTrue(expandCodex.waitForExistence(timeout: 12), app.debugDescription)
+
+        expandUser.tap()
+        XCTAssertTrue(app.buttons["折叠你消息"].waitForExistence(timeout: 5), app.debugDescription)
+        app.buttons["折叠你消息"].tap()
+        XCTAssertTrue(app.buttons["展开你消息"].waitForExistence(timeout: 5), app.debugDescription)
+
+        app.buttons["展开Codex消息"].tap()
+        XCTAssertTrue(app.buttons["折叠Codex消息"].waitForExistence(timeout: 5), app.debugDescription)
+    }
+
+    @MainActor
     func testCodexSourceSwitchesHistoryScope() throws {
         let app = launchApp()
         openCompanyCodex(in: app)
