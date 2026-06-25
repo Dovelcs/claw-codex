@@ -2064,6 +2064,7 @@ Response handle_request(const Request& req) {
         return make_response(200, "{\"events\":" + json_array(selected, event_json) + "}");
     }
     if (req.path == "/v1/commands" && req.method == "POST") {
+        PersistDeferral persist_once;
         long long command_id = g_next_v1_command_id++;
         std::string endpoint_id = json_string_field(req.body, "endpoint_id", g_endpoint.endpoint_id);
         std::string session_id = json_string_field(req.body, "session_id", g_profile_session["home-codex"]);
@@ -2507,9 +2508,11 @@ Response handle_request(const Request& req) {
         return import_transcript_messages_locked(req.body);
     }
     if (req.path == "/api/tasks" && req.method == "POST") {
+        PersistDeferral persist_once;
         return make_response(200, task_json(create_task_locked(req.body, nullptr)));
     }
     if (req.path == "/api/chat-bindings/task" && req.method == "POST") {
+        PersistDeferral persist_once;
         auto key = binding_key(json_string_field(req.body, "channel", "mkb"), json_string_field(req.body, "chat_id", "mkb-ios"));
         auto it = g_bindings.find(key);
         Binding fallback;
