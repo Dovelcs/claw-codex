@@ -7,6 +7,8 @@ and history-sync modes:
 - VS Code Codex IPC task forwarding.
 - Codex session index publication from `~/.codex/session_index.jsonl`.
 - Lazy history transcript loading from `~/.codex/sessions`.
+- Batched transcript upload to the relay, with per-message fallback for older
+  relay deployments.
 
 ## Build
 

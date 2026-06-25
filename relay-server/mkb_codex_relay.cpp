@@ -262,6 +262,55 @@ std::string json_string_field(const std::string& body, const std::string& key, c
     return out;
 }
 
+std::vector<std::string> json_object_array_field(const std::string& body, const std::string& key) {
+    std::vector<std::string> objects;
+    std::regex re("\"" + key + "\"\\s*:\\s*\\[");
+    std::smatch m;
+    if (!std::regex_search(body, m, re)) return objects;
+
+    size_t pos = static_cast<size_t>(m.position(0) + m.length(0));
+    bool in_string = false;
+    bool escape = false;
+    int depth = 0;
+    size_t object_start = std::string::npos;
+
+    for (; pos < body.size(); ++pos) {
+        char c = body[pos];
+        if (in_string) {
+            if (escape) {
+                escape = false;
+            } else if (c == '\\') {
+                escape = true;
+            } else if (c == '"') {
+                in_string = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            in_string = true;
+            continue;
+        }
+        if (c == ']') {
+            if (depth == 0) break;
+            continue;
+        }
+        if (c == '{') {
+            if (depth == 0) object_start = pos;
+            ++depth;
+            continue;
+        }
+        if (c == '}') {
+            if (depth <= 0) continue;
+            --depth;
+            if (depth == 0 && object_start != std::string::npos) {
+                objects.push_back(body.substr(object_start, pos - object_start + 1));
+                object_start = std::string::npos;
+            }
+        }
+    }
+    return objects;
+}
+
 long long json_long_field(const std::string& body, const std::string& key, long long fallback = 0) {
     std::regex re("\"" + key + "\"\\s*:\\s*(-?[0-9]+)");
     std::smatch m;
@@ -1441,6 +1490,63 @@ Response import_transcript_message_locked(const std::string& body) {
     return make_response(400, "{\"error\":\"bad_role\"}");
 }
 
+Response import_transcript_messages_locked(const std::string& body) {
+    std::string session_id = json_string_field(body, "session_id", "codex-desktop-current");
+    std::string endpoint_id = json_string_field(body, "endpoint_id", g_endpoint.endpoint_id);
+    std::string title = json_string_field(body, "title", "当前 Codex 对话");
+    std::string cwd = json_string_field(body, "cwd", "");
+    std::string source = json_string_field(body, "source", "codex-desktop");
+    std::string updated_at = json_string_field(body, "updated_at", "");
+    std::string bind_current = json_string_field(body, "bind_current", "false");
+    std::string profile = json_string_field(body, "profile", "home-codex");
+    std::string channel = json_string_field(body, "channel", "mkb");
+    std::string chat_id = json_string_field(body, "chat_id", "mkb-ios");
+    std::string project_alias = json_string_field(body, "project_alias", g_profile_project[profile].empty() ? "codex-database" : g_profile_project[profile]);
+    auto messages = json_object_array_field(body, "messages");
+    if (session_id.empty()) return make_response(400, "{\"error\":\"empty_session_id\"}");
+    if (messages.empty()) return make_response(400, "{\"error\":\"empty_messages\"}");
+
+    int imported = 0;
+    int ignored = 0;
+    for (size_t i = 0; i < messages.size(); ++i) {
+        const auto& item = messages[i];
+        std::string role = json_string_field(item, "role", "");
+        std::string message = json_string_field(item, "message", "");
+        std::string ordinal = json_string_field(item, "ordinal", std::to_string(i + 1));
+        if (message.empty()) {
+            ++ignored;
+            continue;
+        }
+        std::string one = "{\"session_id\":" + q(session_id) +
+            ",\"endpoint_id\":" + q(endpoint_id) +
+            ",\"title\":" + q(title) +
+            ",\"cwd\":" + q(cwd) +
+            ",\"source\":" + q(source) +
+            ",\"role\":" + q(role) +
+            ",\"message\":" + q(message) +
+            ",\"ordinal\":" + q(ordinal) +
+            ",\"updated_at\":" + q(updated_at) +
+            ",\"bind_current\":" + q(bind_current) +
+            ",\"profile\":" + q(profile) +
+            ",\"channel\":" + q(channel) +
+            ",\"chat_id\":" + q(chat_id) +
+            ",\"project_alias\":" + q(project_alias) + "}";
+        Response res = import_transcript_message_locked(one);
+        if (res.status >= 400) {
+            return make_response(400, "{\"error\":\"batch_item_failed\",\"index\":" + std::to_string(i) +
+                ",\"status\":" + std::to_string(res.status) +
+                ",\"body\":" + q(res.body) + "}");
+        }
+        if (res.body.find("\"ignored\":true") != std::string::npos) ++ignored;
+        else ++imported;
+    }
+    persist_state_locked();
+    return make_response(200, "{\"ok\":true,\"session_id\":" + q(session_id) +
+        ",\"endpoint_id\":" + q(endpoint_id) +
+        ",\"imported\":" + std::to_string(imported) +
+        ",\"ignored\":" + std::to_string(ignored) + "}");
+}
+
 void run_mock_task(std::string task_id) {
     const std::vector<std::pair<std::string, std::string>> script = {
         {"codex.thinking.delta", "正在读取移动端任务、工作区和会话目标。"},
@@ -2369,6 +2475,9 @@ Response handle_request(const Request& req) {
     }
     if (req.path == "/api/transcript/message" && req.method == "POST") {
         return import_transcript_message_locked(req.body);
+    }
+    if (req.path == "/api/transcript/messages" && req.method == "POST") {
+        return import_transcript_messages_locked(req.body);
     }
     if (req.path == "/api/tasks" && req.method == "POST") {
         return make_response(200, task_json(create_task_locked(req.body, nullptr)));

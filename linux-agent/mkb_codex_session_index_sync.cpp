@@ -41,6 +41,12 @@ struct HistoryRequest {
     std::string session_id;
 };
 
+struct TranscriptMessage {
+    std::string role;
+    std::string message;
+    long line_no = 0;
+};
+
 std::string env_or(const char* name, const std::string& fallback = "") {
     const char* value = std::getenv(name);
     return value && *value ? value : fallback;
@@ -359,6 +365,47 @@ bool post_transcript(const Url& broker,
     return false;
 }
 
+bool post_transcripts_batch(const Url& broker,
+                            const IndexRow& row,
+                            const std::string& endpoint_id,
+                            const std::string& project_alias,
+                            const std::string& source,
+                            const std::string& cwd,
+                            const std::vector<TranscriptMessage>& messages) {
+    if (messages.empty()) return true;
+    std::ostringstream body;
+    body << "{\"session_id\":\"" << json_escape(row.id)
+         << "\",\"endpoint_id\":\"" << json_escape(endpoint_id)
+         << "\",\"title\":\"" << json_escape(row.title.empty() ? row.id : row.title)
+         << "\",\"cwd\":\"" << json_escape(cwd)
+         << "\",\"source\":\"" << json_escape(source)
+         << "\",\"updated_at\":\"" << json_escape(row.updated_at)
+         << "\",\"bind_current\":\"false"
+         << "\",\"profile\":\"home-codex\",\"channel\":\"mkb\",\"chat_id\":\"mkb-ios\",\"project_alias\":\""
+         << json_escape(project_alias) << "\",\"messages\":[";
+    for (size_t i = 0; i < messages.size(); ++i) {
+        const auto& item = messages[i];
+        if (i) body << ",";
+        body << "{\"role\":\"" << json_escape(item.role)
+             << "\",\"message\":\"" << json_escape(item.message)
+             << "\",\"ordinal\":\"line-" << item.line_no << "\"}";
+    }
+    body << "]}";
+
+    auto res = http_request(broker, "POST", "/api/transcript/messages", body.str());
+    if (res.status >= 200 && res.status < 300) return true;
+
+    std::cerr << "batch post failed session=" << row.id << " messages=" << messages.size()
+              << " status=" << res.status << " error=" << res.error
+              << " body=" << res.body << "; falling back to per-message posts\n";
+    for (const auto& item : messages) {
+        if (!post_transcript(broker, row, endpoint_id, project_alias, source, cwd, item.role, item.message, item.line_no)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool post_session(const Url& broker,
                   const IndexRow& row,
                   const std::string& endpoint_id,
@@ -384,8 +431,7 @@ std::vector<HistoryRequest> fetch_history_requests(const Url& broker,
     std::vector<HistoryRequest> requests;
     std::ostringstream path;
     path << "/api/history/requests?endpoint_id=" << endpoint_id
-         << "&limit=" << limit
-         << "&include_loaded=true";
+         << "&limit=" << limit;
     auto res = http_request(broker, "GET", path.str());
     if (res.status < 200 || res.status >= 300) {
         std::cerr << "fetch history requests failed status=" << res.status
@@ -434,8 +480,8 @@ bool sync_rollout(const Url& broker,
     std::string cwd;
     std::string last_role;
     std::string last_message;
+    std::vector<TranscriptMessage> messages;
     long line_no = 0;
-    int sent = 0;
     while (std::getline(in, line)) {
         ++line_no;
         if (cwd.empty()) {
@@ -463,12 +509,16 @@ bool sync_rollout(const Url& broker,
             continue;
         }
         if (role == last_role && message == last_message) continue;
-        if (!post_transcript(broker, row, endpoint_id, project_alias, source, cwd, role, message, line_no)) return false;
+        TranscriptMessage item;
+        item.role = role;
+        item.message = message;
+        item.line_no = line_no;
+        messages.push_back(item);
         last_role = role;
         last_message = message;
-        ++sent;
     }
-    std::cerr << "synced session=" << row.id << " title=" << row.title << " messages=" << sent << "\n";
+    if (!post_transcripts_batch(broker, row, endpoint_id, project_alias, source, cwd, messages)) return false;
+    std::cerr << "synced session=" << row.id << " title=" << row.title << " messages=" << messages.size() << "\n";
     return true;
 }
 

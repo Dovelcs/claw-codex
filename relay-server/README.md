@@ -29,4 +29,6 @@ unauthenticated on the public internet.
 - `POST /v1/commands`
 - `POST /api/history/load`
 - `POST /api/workers/*`
-- `POST /api/transcript/*`
+- `POST /api/transcript/session`
+- `POST /api/transcript/message`
+- `POST /api/transcript/messages` for batched history transcript imports
